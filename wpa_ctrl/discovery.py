@@ -23,6 +23,8 @@ import os
 import stat
 from typing import List, Optional
 
+from .client import WpaCtrl
+from .errors import WpaCtrlError
 from .transport import DEFAULT_CTRL_DIR
 
 logger = logging.getLogger(__name__)
@@ -137,11 +139,6 @@ def find_interfaces(ctrl_dir: str = DEFAULT_CTRL_DIR,
 ## Ask a global control socket which interfaces it has. Failure to reach it
 #  is not fatal: the caller falls back to reading the control directory
 def _interfaces_from_global(global_path: str) -> List[str]:
-    # Imported here rather than at module scope: client imports nothing from
-    # this module, and keeping it that way avoids a cycle
-    from .client import WpaCtrl
-    from .errors import WpaCtrlError
-
     try:
         with WpaCtrl(path=global_path) as control:
             return control.interfaces()
