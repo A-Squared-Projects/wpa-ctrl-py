@@ -85,6 +85,15 @@ class TestImports(TestCase):
                          "the packaging dependency list needs updating to "
                          "match; see EXPECTED_STDLIB_IMPORTS")
 
+    ## __all__ is hand-written, so it can name something the package does
+    #  not actually import - which no linter catches and no other test
+    #  exercises, since the name only fails when someone imports it
+    def test_every_declared_export_exists(self):
+        import wpa_ctrl
+        missing = [name for name in wpa_ctrl.__all__
+                   if not hasattr(wpa_ctrl, name)]
+        self.assertEqual(missing, [], "__all__ names something not imported")
+
     ## Third-party dependencies would have to be declared in pyproject and
     #  then packaged for the target; there are none, and that is a feature
     def test_no_third_party_imports(self):

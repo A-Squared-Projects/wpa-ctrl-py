@@ -4,6 +4,13 @@
 # speaking its UNIX datagram protocol directly rather than shelling out to
 # wpa_cli or linking the wpa_ctrl C library.
 #
+# One protocol serves both daemons - upstream implements it once, in
+# src/common/wpa_ctrl.c, which is what hostapd_cli and wpa_cli both link.
+# Point the client at hostapd's socket directory and everything here works
+# the same way:
+#
+#     WpaCtrl("wlan0", ctrl_dir=HOSTAPD_CTRL_DIR)
+#
 # Stdlib only, with no dependencies of any kind:
 #
 #     from wpa_ctrl import WpaCtrl, find_interfaces
@@ -39,6 +46,7 @@ from .transport import (
                      DEFAULT_CLIENT_DIR,
                      DEFAULT_CTRL_DIR,
                      DEFAULT_TIMEOUT,
+                     HOSTAPD_CTRL_DIR,
                      CtrlTransport,
                      interface_path,
 )
@@ -50,6 +58,7 @@ __all__ = [
     "DEFAULT_CTRL_DIR",
     "DEFAULT_TIMEOUT",
     "Event",
+    "HOSTAPD_CTRL_DIR",
     "Network",
     "PmksaEntry",
     "ScanResult",

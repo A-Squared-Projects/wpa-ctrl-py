@@ -112,6 +112,37 @@ with WpaCtrl(path="/run/wpa_supplicant-global") as glob:
 The client binds a socket of its own to receive replies, by default under
 `/tmp`; set `client_dir` if that is not writable.
 
+## hostapd
+
+The same protocol, and upstream implements it once: `src/common/wpa_ctrl.c`
+is what both `wpa_cli` and `hostapd_cli` link, which is where this package
+takes its name. Point the client at hostapd's socket directory and
+everything here — commands, events, discovery — works unchanged:
+
+```python
+from wpa_ctrl import WpaCtrl, HOSTAPD_CTRL_DIR, control_sockets
+
+control_sockets(HOSTAPD_CTRL_DIR)
+
+with WpaCtrl("wlan0", ctrl_dir=HOSTAPD_CTRL_DIR) as ap:
+    print(ap.ping())
+```
+
+The directory differs because the daemons differ —
+`/var/run/wpa_supplicant` against `/var/run/hostapd` — and nothing else
+does.
+
+What the typed command surface below covers is wpa_supplicant's documented
+commands. hostapd's own `hostapd_ctrl_iface.doxygen` documents exactly one
+command, `PING`, so there is nothing else there to implement faithfully;
+its other commands — `STA`, `ALL_STA`, `DEAUTHENTICATE`, `GET_CONFIG`, the
+`WPS_*` family — are documented only in `hostapd_cli.c`, and go through
+`request()`:
+
+```python
+ap.request("ALL_STA")
+```
+
 ## Command surface
 
 Every command in wpa_supplicant's [`ctrl_iface.doxygen`][doc] has a method,

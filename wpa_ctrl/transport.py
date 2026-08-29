@@ -24,8 +24,13 @@ from .errors import WpaCtrlConnectionError, WpaCtrlTimeout
 
 logger = logging.getLogger(__name__)
 
-## Where wpa_supplicant keeps its per-interface sockets by default
+## Where wpa_supplicant keeps its per-interface sockets by default, per
+#  CONFIG_CTRL_IFACE_DIR in wpa_cli.c
 DEFAULT_CTRL_DIR = "/var/run/wpa_supplicant"
+## The same for hostapd, per CONFIG_CTRL_IFACE_DIR in hostapd_cli.c and the
+#  ctrl_interface line in the shipped hostapd.conf. The protocol either side
+#  of the socket is identical - upstream serves both from one wpa_ctrl.c
+HOSTAPD_CTRL_DIR = "/var/run/hostapd"
 ## Where this client puts its own socket. Needs to be writable and is
 #  deliberately not the control directory, which may be root-only
 DEFAULT_CLIENT_DIR = "/tmp"

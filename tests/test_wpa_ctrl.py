@@ -17,6 +17,7 @@ from unittest import TestCase
 from fake_supplicant import FakeSupplicant
 
 from wpa_ctrl import (
+    HOSTAPD_CTRL_DIR,
     Event,
     WpaCtrl,
     WpaCtrlCommandFailed,
@@ -323,6 +324,12 @@ class TestInterfacePath(TestCase):
     def test_explicit_directory(self):
         self.assertEqual(interface_path("wlan0", "/run/wpa_supplicant"),
                          "/run/wpa_supplicant/wlan0")
+
+    ## hostapd speaks the same protocol from a different directory, per
+    #  CONFIG_CTRL_IFACE_DIR in hostapd_cli.c
+    def test_hostapd_directory(self):
+        self.assertEqual(interface_path("wlan0", HOSTAPD_CTRL_DIR),
+                         "/var/run/hostapd/wlan0")
 
 
 if __name__ == '__main__':
