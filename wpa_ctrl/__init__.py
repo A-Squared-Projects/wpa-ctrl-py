@@ -31,7 +31,16 @@
 #
 # @file __init__.py
 
-from .client import Network, PmksaEntry, ScanResult, WpaCtrl, parse_table, parse_variables, quote
+from .client import (
+                     Network,
+                     PmksaEntry,
+                     ScanResult,
+                     WpaCtrl,
+                     format_params,
+                     parse_table,
+                     parse_variables,
+                     quote,
+)
 from .discovery import (
                      SYS_CLASS_NET,
                      control_sockets,
@@ -68,6 +77,7 @@ __all__ = [
     "WpaCtrlError",
     "WpaCtrlTimeout",
     "control_sockets",
+    "format_params",
     "find_interfaces",
     "have_sysfs",
     "interface_path",

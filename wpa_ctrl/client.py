@@ -111,6 +111,19 @@ def parse_table(reply: str, columns: int) -> List[List[str]]:
     return rows
 
 
+## Format the key=value parameters most DPP commands take.
+#
+#  A trailing underscore is stripped from the name, so pass_="..." expresses
+#  DPP's pass=, which Python will not accept as a keyword. Values are used
+#  verbatim: a key, an SSID hexdump or a passphrase hexdump means exactly
+#  what its bytes say, and quoting or case-folding one would corrupt it
+# @param params the parameters to format
+# @return them as a single space-separated string
+def format_params(**params) -> str:
+    return " ".join(f"{name.rstrip('_')}={value}"
+                    for name, value in params.items() if value is not None)
+
+
 ## A connection to one wpa_supplicant (or hostapd) control socket.
 #
 #  Every documented command has a method. Anything not covered - a newer
@@ -535,6 +548,177 @@ class WpaCtrl:
         if period is not None and interval is not None:
             command += f" {period} {interval}"
         self.command(command)
+
+    # ------------------------------------------------------------------
+    # Device Provisioning Protocol, also known as Wi-Fi Easy Connect.
+    #
+    # The onboarding flow - configurator, bootstrap, listen, QR code,
+    # authentication - is described in wpa_supplicant/README-DPP. The rest
+    # of these are in the daemons' control interface command tables and
+    # nowhere else; the README documents the happy path and not the
+    # lifecycle, so stopping a listen or removing a bootstrap record is
+    # taken from the source.
+    #
+    # Both daemons implement DPP. A few commands exist on only one side:
+    # RECONFIG, CA_SET and CONF_SET are wpa_supplicant's, and the relay
+    # controller pair is hostapd's.
+    # ------------------------------------------------------------------
+
+    ## Create a Configurator - the role that hands out credentials
+    #  @param params curve, key, ... as DPP key=value parameters
+    #  @return the new configurator's id
+    def dpp_configurator_add(self, **params) -> int:
+        return self._dpp_id("DPP_CONFIGURATOR_ADD", format_params(**params))
+
+    ## The private key of a Configurator, for saving and restoring it
+    def dpp_configurator_get_key(self, configurator_id) -> str:
+        return self.request(f"DPP_CONFIGURATOR_GET_KEY {configurator_id}").strip()
+
+    ## Change a Configurator's parameters
+    def dpp_configurator_set(self, configurator_id, **params):
+        self.command(f"DPP_CONFIGURATOR_SET {configurator_id} "
+                     f"{format_params(**params)}")
+
+    ## Remove a Configurator, or "all"
+    def dpp_configurator_remove(self, configurator_id):
+        self.command(f"DPP_CONFIGURATOR_REMOVE {configurator_id}")
+
+    ## Configure this device using its own Configurator, rather than
+    #  provisioning a separate Enrollee
+    #  @param params conf, configurator and ssid, as DPP key=value
+    #         parameters. ssid is a hexdump, not a quoted string
+    def dpp_configurator_sign(self, **params):
+        self.command(f"DPP_CONFIGURATOR_SIGN {format_params(**params)}")
+
+    ## Generate a bootstrapping key and the information to publish it,
+    #  typically as a QR code
+    #  @param params type (qrcode, pkex, nfc-uri), mac, chan, key, ...
+    #  @return the new bootstrap record's id
+    def dpp_bootstrap_gen(self, **params) -> int:
+        return self._dpp_id("DPP_BOOTSTRAP_GEN", format_params(**params))
+
+    ## The URI to put in a QR code, for a bootstrap record we generated
+    def dpp_bootstrap_get_uri(self, bootstrap_id) -> str:
+        return self.request(f"DPP_BOOTSTRAP_GET_URI {bootstrap_id}").strip()
+
+    ## What is known about a bootstrap record
+    def dpp_bootstrap_info(self, bootstrap_id) -> Dict[str, str]:
+        return parse_variables(self.request(f"DPP_BOOTSTRAP_INFO {bootstrap_id}"))
+
+    ## Change a bootstrap record's parameters
+    def dpp_bootstrap_set(self, bootstrap_id, **params):
+        self.command(f"DPP_BOOTSTRAP_SET {bootstrap_id} {format_params(**params)}")
+
+    ## Remove a bootstrap record, or "all"
+    def dpp_bootstrap_remove(self, bootstrap_id):
+        self.command(f"DPP_BOOTSTRAP_REMOVE {bootstrap_id}")
+
+    ## Take in a peer's bootstrapping URI, as read from its QR code
+    #  @param uri the URI, verbatim
+    #  @return the id of the bootstrap record created for that peer
+    def dpp_qr_code(self, uri: str) -> int:
+        return self._dpp_id("DPP_QR_CODE", uri)
+
+    ## Take in a peer's bootstrapping URI read over NFC
+    def dpp_nfc_uri(self, uri: str) -> int:
+        return self._dpp_id("DPP_NFC_URI", uri)
+
+    ## NFC negotiated handover, request side
+    def dpp_nfc_handover_req(self, uri: str) -> int:
+        return self._dpp_id("DPP_NFC_HANDOVER_REQ", uri)
+
+    ## NFC negotiated handover, select side
+    def dpp_nfc_handover_sel(self, uri: str) -> int:
+        return self._dpp_id("DPP_NFC_HANDOVER_SEL", uri)
+
+    ## Wait on a frequency for a Configurator to start authentication.
+    #  An Enrollee does this; the frequency is in MHz, so 2412 for 2.4 GHz
+    #  channel 1
+    #  @param freq the frequency to listen on, in MHz
+    #  @param params role, netrole, qr, ... as DPP key=value parameters
+    def dpp_listen(self, freq: int, **params):
+        command = f"DPP_LISTEN {freq}"
+        arguments = format_params(**params)
+        self.command(f"{command} {arguments}" if arguments else command)
+
+    ## Stop listening
+    def dpp_stop_listen(self):
+        self.command("DPP_STOP_LISTEN")
+
+    ## Start authentication with a peer whose bootstrapping information we
+    #  already have
+    #  @param params peer, conf, ssid, configurator, pass_, ... as DPP
+    #         key=value parameters. ssid and pass_ are hexdumps
+    def dpp_auth_init(self, **params):
+        self.command(f"DPP_AUTH_INIT {format_params(**params)}")
+
+    ## Announce presence to a Configurator that is listening for chirps
+    def dpp_chirp(self, **params):
+        self.command(f"DPP_CHIRP {format_params(**params)}")
+
+    ## Stop chirping
+    def dpp_stop_chirp(self):
+        self.command("DPP_STOP_CHIRP")
+
+    ## Push-button bootstrapping, where the pairing is authorised by
+    #  pressing a button on both devices at once
+    def dpp_push_button(self, **params):
+        arguments = format_params(**params)
+        self.command(f"DPP_PUSH_BUTTON {arguments}" if arguments
+                     else "DPP_PUSH_BUTTON")
+
+    ## Ask for new credentials for a network already configured by DPP
+    #  @param arguments the network id, and any parameters the daemon takes
+    def dpp_reconfig(self, arguments: str):
+        self.command(f"DPP_RECONFIG {arguments}")
+
+    ## Add a PKEX bootstrapping record - the password-based alternative to
+    #  scanning a QR code
+    #  @param params own, identifier, init, code, ... as key=value
+    #  @return the new bootstrap record's id
+    def dpp_pkex_add(self, **params) -> int:
+        return self._dpp_id("DPP_PKEX_ADD", format_params(**params))
+
+    ## Remove a PKEX record, or "all"
+    def dpp_pkex_remove(self, pkex_id):
+        self.command(f"DPP_PKEX_REMOVE {pkex_id}")
+
+    ## Listen for DPP over TCP rather than over the air
+    def dpp_controller_start(self, **params):
+        arguments = format_params(**params)
+        self.command(f"DPP_CONTROLLER_START {arguments}" if arguments
+                     else "DPP_CONTROLLER_START")
+
+    ## Stop the TCP controller
+    def dpp_controller_stop(self):
+        self.command("DPP_CONTROLLER_STOP")
+
+    ## Relay DPP frames to a Controller reached over TCP (hostapd)
+    #  @param arguments the controller address, and its public key hash
+    def dpp_relay_add_controller(self, arguments: str):
+        self.command(f"DPP_RELAY_ADD_CONTROLLER {arguments}")
+
+    ## Stop relaying to a Controller (hostapd)
+    def dpp_relay_remove_controller(self, arguments: str):
+        self.command(f"DPP_RELAY_REMOVE_CONTROLLER {arguments}")
+
+    ## Set the certificate authority parameters used for DPP over TCP
+    def dpp_ca_set(self, **params):
+        self.command(f"DPP_CA_SET {format_params(**params)}")
+
+    ## Set configuration parameters used when acting as a Configurator
+    def dpp_conf_set(self, **params):
+        self.command(f"DPP_CONF_SET {format_params(**params)}")
+
+    ## Send a DPP command whose reply is an identifier, and return it.
+    #  A refusal comes back as FAIL rather than a number
+    def _dpp_id(self, command: str, arguments: str) -> int:
+        full = f"{command} {arguments}" if arguments else command
+        reply = self.request(full).strip()
+        try:
+            return int(reply)
+        except ValueError:
+            raise WpaCtrlCommandFailed(full, reply) from None
 
     # ------------------------------------------------------------------
     # Present in wpa_supplicant, absent from ctrl_iface.doxygen. Widely

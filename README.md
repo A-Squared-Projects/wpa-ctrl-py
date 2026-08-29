@@ -143,6 +143,50 @@ its other commands — `STA`, `ALL_STA`, `DEAUTHENTICATE`, `GET_CONFIG`, the
 ap.request("ALL_STA")
 ```
 
+## DPP (Wi-Fi Easy Connect)
+
+Both daemons implement DPP, and all 29 of its commands have methods. The
+onboarding flow is the one in `wpa_supplicant/README-DPP` — a Configurator
+hands credentials to an Enrollee, having bootstrapped trust from something
+out of band, usually a QR code:
+
+```python
+# On the Enrollee: publish a bootstrapping key as a QR code, then wait
+bootstrap = wpa.dpp_bootstrap_gen(type="qrcode", mac="001122334455",
+                                  chan="81/1")
+print(wpa.dpp_bootstrap_get_uri(bootstrap))   # DPP:C:81/1;M:...;K:...;;
+wpa.dpp_listen(2412)                          # MHz, so 2.4 GHz channel 1
+
+# On the Configurator: read that URI from the QR code and provision
+configurator = wpa.dpp_configurator_add()
+peer = wpa.dpp_qr_code(uri)
+wpa.dpp_auth_init(peer=peer, conf="sta-dpp", ssid=ssid_hex,
+                  configurator=configurator)
+```
+
+Parameters are passed as keywords and become DPP's `key=value` arguments.
+Values are used verbatim, because a key, an SSID hexdump or a passphrase
+hexdump means exactly what its bytes say. A trailing underscore is stripped,
+so `pass_=` expresses DPP's `pass=`, which Python will not accept as a
+keyword:
+
+```python
+wpa.dpp_auth_init(peer=peer, conf="sta-psk", ssid=ssid_hex,
+                  pass_=passphrase_hex)
+```
+
+Progress arrives as events — `DPP-AUTH-SUCCESS`, `DPP-CONF-RECEIVED`,
+`DPP-CONF-SENT`, `DPP-FAILED` and the rest of the 43 in `wpa_ctrl.events` —
+so an onboarding flow wants an attached connection alongside the one issuing
+commands.
+
+The README documents the happy path rather than the lifecycle, so
+`dpp_stop_listen()`, the `_remove` and `_set` calls, PKEX, chirping, the TCP
+controller and the NFC handover pairs come from the daemons' command tables
+instead. A few are one-sided: `dpp_reconfig()`, `dpp_ca_set()` and
+`dpp_conf_set()` are wpa_supplicant's, and the relay controller pair is
+hostapd's.
+
 ## Command surface
 
 Every command in wpa_supplicant's [`ctrl_iface.doxygen`][doc] has a method,
