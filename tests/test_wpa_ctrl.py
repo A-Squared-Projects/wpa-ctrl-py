@@ -10,6 +10,7 @@
 
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 from unittest import TestCase
@@ -94,8 +95,21 @@ class TestRequestReply(WpaCtrlTestCase):
         with self.assertRaises(WpaCtrlConnectionError):
             client.ping()
 
+    ## Where the abstract namespace exists the client leaves nothing on
+    #  disk at all, so there is nothing to leak when a process is killed
+    #  outright - and no writable directory is needed
+    @unittest.skipUnless(sys.platform.startswith("linux"),
+                         "abstract sockets are Linux only")
+    def test_no_file_is_created_on_linux(self):
+        self.start_server({"PING": "PONG\n"})
+        client = self.make_client()
+        client.ping()
+        self.assertEqual(os.listdir(self.directory), ["wlan0"])
+
     ## The client's own socket is an artefact on disk; it must not be left
     #  behind, or /tmp fills up one connection at a time
+    @unittest.skipIf(sys.platform.startswith("linux"),
+                     "on Linux the address is abstract, not a file")
     def test_client_socket_is_cleaned_up(self):
         self.start_server({"PING": "PONG\n"})
         client = self.make_client()

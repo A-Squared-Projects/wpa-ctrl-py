@@ -31,9 +31,11 @@ DEFAULT_CTRL_DIR = "/var/run/wpa_supplicant"
 #  ctrl_interface line in the shipped hostapd.conf. The protocol either side
 #  of the socket is identical - upstream serves both from one wpa_ctrl.c
 HOSTAPD_CTRL_DIR = "/var/run/hostapd"
-## Where this client puts its own socket. Needs to be writable and is
-#  deliberately not the control directory, which may be root-only
+## Where this client puts its own socket, when it needs one on disk at all.
+#  Only used where the abstract namespace is unavailable - see open()
 DEFAULT_CLIENT_DIR = "/tmp"
+## Prefix marking an abstract-namespace address, as wpa_ctrl.c spells it
+ABSTRACT_PREFIX = "@abstract:"
 ## Long enough for a busy supplicant to answer a scan, short enough that a
 #  caller blocked on a dead daemon notices
 DEFAULT_TIMEOUT = 5.0
@@ -78,21 +80,35 @@ class CtrlTransport:
     def connected(self) -> bool:
         return self._socket is not None
 
-    ## Bind our own socket and connect it to wpa_supplicant's
+    ## Bind our own socket and connect it to wpa_supplicant's.
+    #
+    #  The client needs an address of its own because the daemon replies to
+    #  it by name - a datagram socket, so every reply resolves the address
+    #  afresh, and unlinking it after connecting silently loses every reply.
+    #
+    #  Linux's abstract namespace avoids the problem rather than managing
+    #  it: the address lives outside the filesystem, needs no writable
+    #  directory, and disappears with the socket even if the process is
+    #  killed outright. A filesystem path is the fallback, and then the
+    #  address is a real file that a SIGKILLed process leaves behind
     def open(self):
         if self._socket is not None:
             return
 
         # Unique per process and per connection: a process may hold several
         # (one for commands, one attached for events)
-        client_path = os.path.join(
-            self._client_dir, f"wpa_ctrl_{os.getpid()}-{id(self)}")
+        name = f"wpa_ctrl_{os.getpid()}-{id(self)}"
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        client_path = None
         try:
-            # A crashed predecessor can leave its address behind
-            self._unlink(client_path)
-            sock.bind(client_path)
-            sock.connect(self._path)
+            try:
+                sock.bind("\0" + name)
+            except (OSError, AttributeError):
+                # No abstract namespace here - macOS, other Unixes
+                client_path = os.path.join(self._client_dir, name)
+                self._unlink(client_path)   # a crashed predecessor's leftover
+                sock.bind(client_path)
+            sock.connect(_address(self._path))
         except OSError as ex:
             sock.close()
             self._unlink(client_path)
@@ -101,7 +117,7 @@ class CtrlTransport:
         sock.settimeout(self._timeout)
         self._socket = sock
         self._client_path = client_path
-        logger.debug(f"Opened {self._path} as {client_path}")
+        logger.debug(f"Opened {self._path} as {client_path or '@' + name}")
 
     ## Close the connection and remove our socket from the filesystem
     def close(self):
@@ -176,6 +192,16 @@ class CtrlTransport:
         except OSError:
             # Never existed, or someone else cleaned up - either is fine
             pass
+
+
+## The address to hand to bind/connect for a control socket path.
+#  "@abstract:name" addresses the abstract namespace, the spelling
+#  wpa_ctrl.c uses; anything else is a filesystem path
+# @param path the control socket path
+def _address(path: str) -> str:
+    if path.startswith(ABSTRACT_PREFIX):
+        return "\0" + path[len(ABSTRACT_PREFIX):]
+    return path
 
 
 ## Seconds remaining until a deadline, never negative

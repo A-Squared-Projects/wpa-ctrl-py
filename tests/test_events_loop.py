@@ -30,6 +30,20 @@ def tearDownModule():
     print()
 
 
+## "@abstract:name" is how wpa_ctrl.c spells an abstract-namespace socket,
+#  and a daemon can be configured to listen on one
+class TestAbstractAddresses(TestCase):
+
+    def test_abstract_prefix_becomes_a_null_prefixed_address(self):
+        from wpa_ctrl.transport import _address
+        self.assertEqual(_address("@abstract:wpa_wlan0"), "\0wpa_wlan0")
+
+    def test_a_filesystem_path_is_left_alone(self):
+        from wpa_ctrl.transport import _address
+        self.assertEqual(_address("/var/run/wpa_supplicant/wlan0"),
+                         "/var/run/wpa_supplicant/wlan0")
+
+
 class TestFileno(TestCase):
 
     def setUp(self):
