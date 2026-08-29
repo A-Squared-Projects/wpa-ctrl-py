@@ -15,6 +15,7 @@
 
 import logging
 import os
+import select
 import socket
 import time
 from typing import Optional
@@ -142,7 +143,7 @@ class CtrlTransport:
     def pending(self, timeout: float = 0.0) -> bool:
         sock = self._require_socket()
         try:
-            readable, _, _ = _select(sock, timeout)
+            readable, _, _ = select.select([sock], [], [], timeout)
         except OSError as ex:
             raise WpaCtrlConnectionError(f"select on {self._path}: {ex}") from ex
         return bool(readable)
@@ -161,12 +162,6 @@ class CtrlTransport:
         except OSError:
             # Never existed, or someone else cleaned up - either is fine
             pass
-
-
-## select() on one socket, kept behind a function so the import stays local
-def _select(sock: socket.socket, timeout: float):
-    import select
-    return select.select([sock], [], [], timeout)
 
 
 ## Seconds remaining until a deadline, never negative
