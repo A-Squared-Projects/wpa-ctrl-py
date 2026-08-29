@@ -6,15 +6,20 @@
 # names and plain administrative renames all produce something else, and
 # wpa_supplicant is equally happy managing several interfaces at once.
 #
-# Two questions get asked here, and they are not the same one:
+# The question this package can answer authoritatively is which interfaces
+# have a control socket - control_sockets(), or a global socket's INTERFACES
+# command. Nothing else knows that.
 #
-#   - which interfaces can this library reach? Those are the ones with a
-#     control socket, which is what control_sockets() and a global socket's
-#     INTERFACES command report
-#   - which interfaces are wireless? That is the kernel's answer, read from
-#     sysfs by wireless_interfaces()
+# Whether an interface is wireless is the kernel's question, not this
+# package's, and is_wireless() here is a two-line sysfs check rather than a
+# real answer: anything richer - interface type, phy, whether it is a P2P
+# device - wants nl80211 through pyroute2 or iw. It is offered because it is
+# cheap and sometimes all a caller needs, and it is opt-in.
 #
-# find_interfaces() puts them together for the common case.
+# Notably it is NOT how find_interfaces() filters, because wpa_supplicant
+# also handles wired 802.1X: a control socket can legitimately belong to an
+# ethernet interface, and filtering those out by default would hide an
+# interface this library can talk to perfectly well.
 #
 # @file discovery.py
 
@@ -112,18 +117,25 @@ def have_sysfs(sys_class_net: str = SYS_CLASS_NET) -> bool:
 #  the control directory. Either way the answer is what has a control
 #  socket, because that is what can be talked to.
 #
-#  wireless_only filters that list through sysfs, but only where sysfs can
-#  answer: on a system with no /sys/class/net the filter is skipped rather
-#  than applied blind, since "cannot tell" must not be reported as "none".
+#  Interfaces the kernel has never heard of are dropped: a socket outliving
+#  its interface is a leftover, not something to hand back. That is an
+#  existence check, deliberately not a wireless one - wpa_supplicant handles
+#  wired 802.1X, so an ethernet interface with a control socket is a real
+#  interface this library can talk to. Pass wireless_only to filter those
+#  out anyway.
+#
+#  Both checks need sysfs, and where there is none - a container without
+#  /sys, a host that is not Linux - they are skipped rather than applied
+#  blind: "cannot tell" must not be reported as "none".
 #
 # @param ctrl_dir directory wpa_supplicant was told to use
 # @param global_path the global control socket, if there is one
-# @param wireless_only drop interfaces the kernel says are not wireless
+# @param wireless_only also drop interfaces the kernel says are not wireless
 # @param sys_class_net override the sysfs location, for testing
 # @return the interface names, sorted
 def find_interfaces(ctrl_dir: str = DEFAULT_CTRL_DIR,
                     global_path: Optional[str] = None,
-                    wireless_only: bool = True,
+                    wireless_only: bool = False,
                     sys_class_net: str = SYS_CLASS_NET) -> List[str]:
     names = []
     if global_path:
@@ -131,9 +143,16 @@ def find_interfaces(ctrl_dir: str = DEFAULT_CTRL_DIR,
     if not names:
         names = control_sockets(ctrl_dir)
 
-    if wireless_only and have_sysfs(sys_class_net):
-        names = [name for name in names if is_wireless(name, sys_class_net)]
+    if have_sysfs(sys_class_net):
+        names = [name for name in names
+                 if _interface_exists(name, sys_class_net)
+                 and (not wireless_only or is_wireless(name, sys_class_net))]
     return sorted(names)
+
+
+## True if the kernel currently has an interface by this name
+def _interface_exists(ifname: str, sys_class_net: str) -> bool:
+    return os.path.isdir(os.path.join(sys_class_net, ifname))
 
 
 ## Ask a global control socket which interfaces it has. Failure to reach it

@@ -97,38 +97,45 @@ class TestSysfs(DiscoveryTestCase):
 
 class TestFindInterfaces(DiscoveryTestCase):
 
-    def test_filters_control_sockets_by_wirelessness(self):
+    ## wpa_supplicant handles wired 802.1X, so an ethernet interface with a
+    #  control socket is a real interface this library can talk to. Filtering
+    #  on wirelessness by default would hide it
+    def test_a_wired_8021x_interface_is_not_dropped(self):
         self.add_socket("wlp2s0")
         self.add_socket("enp0s31f6")
         self.add_interface("wlp2s0", wireless=True)
         self.add_interface("enp0s31f6", wireless=False)
         self.assertEqual(
             find_interfaces(self.ctrl_dir, sys_class_net=self.sys_class_net),
-            ["wlp2s0"])
+            ["enp0s31f6", "wlp2s0"])
 
-    def test_wireless_filter_can_be_turned_off(self):
+    def test_wireless_filter_is_available_opt_in(self):
         self.add_socket("wlp2s0")
         self.add_socket("enp0s31f6")
         self.add_interface("wlp2s0", wireless=True)
         self.add_interface("enp0s31f6", wireless=False)
         self.assertEqual(
-            find_interfaces(self.ctrl_dir, wireless_only=False,
+            find_interfaces(self.ctrl_dir, wireless_only=True,
                             sys_class_net=self.sys_class_net),
-            ["enp0s31f6", "wlp2s0"])
+            ["wlp2s0"])
 
     ## The decision worth locking in: with no sysfs to consult - a container
-    #  with no /sys, or a host that is not Linux - the filter is skipped
+    #  with no /sys, or a host that is not Linux - the checks are skipped
     #  rather than applied blind. "Cannot tell" must not be reported as
     #  "none", which would silently strand a caller with no interfaces
-    def test_without_sysfs_the_filter_is_skipped_not_applied(self):
+    def test_without_sysfs_the_checks_are_skipped_not_applied(self):
         self.add_socket("wlp2s0")
+        absent = os.path.join(self.root, "absent")
+        self.assertEqual(find_interfaces(self.ctrl_dir, sys_class_net=absent),
+                         ["wlp2s0"])
         self.assertEqual(
-            find_interfaces(self.ctrl_dir,
-                            sys_class_net=os.path.join(self.root, "absent")),
+            find_interfaces(self.ctrl_dir, wireless_only=True,
+                            sys_class_net=absent),
             ["wlp2s0"])
 
     ## A socket for an interface sysfs has never heard of is stale - the
-    #  interface was renamed or removed and the daemon did not clean up
+    #  interface was renamed or removed and the daemon did not clean up.
+    #  This is what the sysfs check is for, rather than wirelessness
     def test_stale_socket_for_an_absent_interface_is_dropped(self):
         self.add_socket("wlan0")
         self.add_interface("wlp2s0", wireless=True)

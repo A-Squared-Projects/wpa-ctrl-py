@@ -57,28 +57,45 @@ account of itself is preferred over reading the directory:
 find_interfaces(global_path="/run/wpa_supplicant-global")
 ```
 
-Two separate questions sit underneath, and they can be asked directly:
+`control_sockets()` is the same list without the tidying, and stats each
+entry rather than trusting the directory listing, so a file left behind by a
+crashed daemon is not offered up as an interface:
 
 ```python
-from wpa_ctrl import control_sockets, wireless_interfaces
+from wpa_ctrl import control_sockets
 
-control_sockets()       # what this library can reach: one socket per
-                        # interface wpa_supplicant is managing
-wireless_interfaces()   # what the kernel says is wireless, managed or not
+control_sockets()   # one socket per interface wpa_supplicant is managing
 ```
 
-`control_sockets()` stats each entry rather than trusting the directory
-listing, so a file left behind by a crashed daemon is not offered up as an
-interface. `wireless_interfaces()` reads the `phy80211` symlink each
-interface gets in sysfs — not the `wireless/` directory, which comes from
-wireless-extensions compatibility and is missing on a kernel built without
-it.
+What `find_interfaces()` drops is an interface the kernel has never heard
+of — a socket that outlived its interface. That is an existence check and
+deliberately not a wireless one: wpa_supplicant also handles wired 802.1X,
+so an ethernet interface with a control socket is a real interface this
+library can talk to, and filtering on wirelessness would hide it. Pass
+`wireless_only=True` if you want them gone anyway.
 
 Where there is no sysfs to consult at all — a container with no `/sys`, or a
-host that is not Linux — `find_interfaces()` skips the wireless filter
-rather than applying it blind. "Cannot tell" is not the same answer as
-"none", and reporting the second would strand a caller with no interfaces
-at all.
+host that is not Linux — those checks are skipped rather than applied blind.
+"Cannot tell" is not the same answer as "none", and reporting the second
+would strand a caller with no interfaces at all.
+
+### Is this interface wireless?
+
+That is the kernel's question rather than this package's, and
+`is_wireless()` is a two-line sysfs check offered because it is cheap:
+
+```python
+from wpa_ctrl import is_wireless, wireless_interfaces
+
+is_wireless("wlp2s0")   # reads the phy80211 symlink in sysfs
+wireless_interfaces()   # every wireless interface, managed or not
+```
+
+It reads `phy80211` rather than the `wireless/` directory, which comes from
+wireless-extensions compatibility and is missing on a kernel built without
+it. For anything richer — interface type, phy, whether it is a P2P
+device — use nl80211 through [pyroute2](https://pyroute2.org/) or `iw`.
+This package does not try to be that.
 
 ## Sockets
 
