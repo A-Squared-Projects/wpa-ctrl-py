@@ -203,3 +203,10 @@ mock would only assert the implementation's own assumptions back at it.
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
+
+This is an independent implementation and contains no hostap code, but the
+event names are taken from `src/common/wpa_ctrl.h` and some test fixtures
+from `doc/ctrl_iface.doxygen`. hostap is BSD-3-Clause, which MIT combines
+with freely; its notice is reproduced in [NOTICE](NOTICE) on account of
+those two. Neither this package nor its authors are affiliated with or
+endorsed by the hostap project.

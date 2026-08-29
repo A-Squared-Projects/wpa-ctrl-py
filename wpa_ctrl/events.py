@@ -26,6 +26,9 @@ MSG_ERROR = 5
 #  CTRL-EVENT-SCAN-STARTED, to pick one seen on a live device, appears in
 #  neither ctrl_iface.doxygen nor hostapd_ctrl_iface.doxygen.
 #
+#  hostap is BSD-3-Clause; its notice is reproduced in NOTICE, since these
+#  names come from it.
+#
 #  Generated from hostap 2_12-bp-305-g168f9755d9d0. Regenerate when that
 #  moves: parse_event() copes with names it has never seen, so a stale list
 #  costs a caller a constant rather than a missed event.

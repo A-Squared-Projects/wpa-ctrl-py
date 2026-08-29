@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Pure-Python client for the wpa_supplicant/hostapd control interface"
 readme = "README.md"
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Alex Kiernan", email = "alex.kiernan@gmail.com" }]
 maintainers = [{ name = "A-Squared Projects" }]
 keywords = ["wpa_supplicant", "hostapd", "wifi", "wpa_cli", "ctrl_iface"]
