@@ -242,6 +242,33 @@ class TestEvents(WpaCtrlTestCase):
         event = parse_event("<3>CTRL-REQ-PASSWORD-1:Password needed for SSID foo")
         self.assertTrue(event.is_request)
 
+    ## The reason the constants come from wpa_ctrl.h rather than the
+    #  documentation: this one arrived on a live device during a scan and
+    #  appears in neither doxygen file
+    def test_undocumented_but_real_events_have_constants(self):
+        from wpa_ctrl import events
+        self.assertEqual(events.CTRL_EVENT_SCAN_STARTED,
+                         "CTRL-EVENT-SCAN-STARTED")
+        self.assertEqual(events.CTRL_EVENT_BSS_ADDED, "CTRL-EVENT-BSS-ADDED")
+        self.assertEqual(events.AP_STA_CONNECTED, "AP-STA-CONNECTED")
+
+    ## Every constant has to survive the round trip through the parser, or
+    #  a caller comparing event.name against one of them silently never
+    #  matches. Cheap to assert across the whole generated list
+    def test_every_event_constant_parses_back_to_itself(self):
+        from wpa_ctrl import events
+        checked = 0
+        for name in dir(events):
+            value = getattr(events, name)
+            if not name.isupper() or not isinstance(value, str):
+                continue
+            if value.endswith("-"):
+                # A prefix rather than a whole name, e.g. CTRL-REQ-
+                continue
+            self.assertEqual(parse_event(f"<3>{value} params").name, value)
+            checked += 1
+        self.assertGreater(checked, 250, "the event list looks truncated")
+
     def test_attach_then_receive(self):
         server = self.start_server({"ATTACH": "OK\n"})
         client = self.make_client()
