@@ -177,6 +177,12 @@ from wpa_ctrl.compat import execute_command
 success, output = execute_command("status")
 ```
 
+The verb is upper-cased on the way out, because the control interface is
+case sensitive and answers `UNKNOWN COMMAND` to anything else, while
+`wpa_cli` let you type it in lower case. Arguments are passed through
+untouched — a variable name like `ssid` has to stay lower case, and
+changing the case of a value would change the credential.
+
 It differs from a subprocess wrapper in one way worth stating plainly: when
 the daemon cannot be reached it returns `(False, None)`. Wrappers that
 reacted to a failed `wpa_cli` by killing the process — to make a watchdog

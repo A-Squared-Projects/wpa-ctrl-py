@@ -313,18 +313,37 @@ class TestCompatLayer(WpaCtrlTestCase):
         compat._clients["wlan0"] = client
         return client
 
+    ## The control interface is case sensitive - lower case gets UNKNOWN
+    #  COMMAND - and every caller migrating off wpa_cli has lower case
+    #  spelled through its code, because wpa_cli accepted it
+    def test_the_verb_is_sent_upper_case(self):
+        self._client_for({"DISCONNECT": "OK\n"})
+        self.assertEqual(compat.execute_command("disconnect"), (True, None))
+        self.assertEqual(self.server.received, ["DISCONNECT"])
+
+    ## Only the verb. A network id, a variable name like ssid or key_mgmt,
+    #  and above all a value - an SSID or a passphrase - go through as they
+    #  were given, because changing their case changes what they mean
+    def test_arguments_keep_their_case(self):
+        self._client_for({'SET_NETWORK 0 ssid "MyHome WiFi"': "OK\n"})
+        self.assertEqual(
+            compat.execute_command("set_network", 0, "ssid", '"MyHome WiFi"'),
+            (True, None))
+        self.assertEqual(self.server.received,
+                         ['SET_NETWORK 0 ssid "MyHome WiFi"'])
+
     def test_ok_returns_true_and_no_output(self):
-        self._client_for({"disconnect": "OK\n"})
+        self._client_for({"DISCONNECT": "OK\n"})
         self.assertEqual(compat.execute_command("disconnect"), (True, None))
 
     def test_data_reply_returns_the_text(self):
-        self._client_for({"status": "wpa_state=COMPLETED\n"})
+        self._client_for({"STATUS": "wpa_state=COMPLETED\n"})
         success, output = compat.execute_command("status")
         self.assertTrue(success)
         self.assertEqual(output, "wpa_state=COMPLETED")
 
     def test_fail_returns_false(self):
-        self._client_for({"save_config": "FAIL\n"})
+        self._client_for({"SAVE_CONFIG": "FAIL\n"})
         self.assertEqual(compat.execute_command("save_config"), (False, None))
 
     ## The wpa_cli wrapper called os._exit(1) here to trigger the watchdog.
@@ -335,11 +354,11 @@ class TestCompatLayer(WpaCtrlTestCase):
         self.assertEqual(compat.execute_command("status"), (False, None))
 
     def test_arguments_are_joined_like_wpa_cli(self):
-        self._client_for({'set_network 0 ssid "example"': "OK\n"})
+        self._client_for({'SET_NETWORK 0 ssid "example"': "OK\n"})
         self.assertEqual(
             compat.execute_command("set_network", 0, "ssid", '"example"'),
             (True, None))
-        self.assertEqual(self.server.received, ['set_network 0 ssid "example"'])
+        self.assertEqual(self.server.received, ['SET_NETWORK 0 ssid "example"'])
 
 
 class TestInterfacePath(TestCase):

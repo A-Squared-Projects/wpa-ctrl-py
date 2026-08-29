@@ -64,9 +64,18 @@ def close_all():
 #         (False, None) for FAIL or any error reaching the daemon
 def execute_command(*cmd_args, no_logging: bool = False,
                     ifname: str = DEFAULT_INTERFACE) -> Tuple[bool, Optional[str]]:
-    # wpa_cli takes its commands in lower case and the interface accepts
-    # either; upper case is what the documentation uses
+    # The control interface is case sensitive and answers UNKNOWN COMMAND to
+    # anything else, but wpa_cli lets you type commands in lower case and
+    # sends the canonical form. Callers moving off wpa_cli have lower case
+    # spelled through their code, so do what wpa_cli did.
+    #
+    # The verb only. Everything after it is data - network ids, variable
+    # names like ssid and key_mgmt, which wpa_supplicant wants in lower
+    # case, and values like an SSID or a passphrase, where changing the case
+    # would change the credential
     command = " ".join(str(arg) for arg in cmd_args)
+    verb, separator, remainder = command.partition(" ")
+    command = verb.upper() + separator + remainder
     if not no_logging:
         logger.debug(command)
     try:
