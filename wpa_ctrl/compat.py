@@ -11,7 +11,7 @@
 import logging
 from typing import Optional, Tuple
 
-from .client import REPLY_OK, WpaCtrl
+from .client import REPLY_FAIL, REPLY_OK, REPLY_UNKNOWN, WpaCtrl
 from .errors import WpaCtrlError
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,10 @@ def execute_command(*cmd_args, no_logging: bool = False,
         return False, None
 
     output = reply.rstrip("\n")
-    if output.startswith("FAIL"):
+    # FAIL, FAIL-BUSY and friends, and UNKNOWN COMMAND. The last one is a
+    # refusal too, and reporting it as a successful reply hands the caller a
+    # string where it expected data
+    if output.startswith(REPLY_FAIL) or output.startswith(REPLY_UNKNOWN):
         logger.warning(f"Control interface command result: {output}")
         return False, None
     if output == REPLY_OK:

@@ -342,6 +342,13 @@ class TestCompatLayer(WpaCtrlTestCase):
         self.assertTrue(success)
         self.assertEqual(output, "wpa_state=COMPLETED")
 
+    ## A refused command is not a successful reply carrying the word
+    #  "UNKNOWN COMMAND" as its data
+    def test_unknown_command_returns_false(self):
+        self._client_for({"NO_SUCH_COMMAND": "UNKNOWN COMMAND\n"})
+        self.assertEqual(compat.execute_command("no_such_command"),
+                         (False, None))
+
     def test_fail_returns_false(self):
         self._client_for({"SAVE_CONFIG": "FAIL\n"})
         self.assertEqual(compat.execute_command("save_config"), (False, None))
