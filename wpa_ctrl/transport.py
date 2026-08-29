@@ -143,6 +143,15 @@ class CtrlTransport:
         # Losing a byte of an access point name must not lose the message
         return data.decode(errors="replace")
 
+    ## The underlying socket's file descriptor, for handing to an event
+    #  loop - asyncio's add_reader, a Qt notifier, a bare select.
+    #
+    #  Remove it from the loop before close(): the descriptor is closed with
+    #  the socket, and a loop still watching it will either spin or raise
+    # @return the descriptor
+    def fileno(self) -> int:
+        return self._require_socket().fileno()
+
     ## True if a datagram is already waiting, without consuming it
     # @param timeout seconds to wait for one to arrive
     def pending(self, timeout: float = 0.0) -> bool:

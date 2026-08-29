@@ -230,6 +230,21 @@ class WpaCtrl:
         self.command("DETACH")
         self._attached = False
 
+    ## The control socket's file descriptor, for driving this connection
+    #  from an event loop instead of polling it.
+    #
+    #  Register it for read, and call next_event() when it fires, draining
+    #  while pending() stays true - one readable socket can hold more than
+    #  one datagram. Use a connection that is attached and does nothing
+    #  else, so everything arriving is an event and nothing can be mistaken
+    #  for a command's reply.
+    #
+    #  Unregister before close(), which closes the descriptor underneath a
+    #  loop that is still watching it
+    # @return the descriptor
+    def fileno(self) -> int:
+        return self._transport.fileno()
+
     ## True if an event is already waiting
     # @param timeout seconds to wait for one
     def pending(self, timeout: float = 0.0) -> bool:

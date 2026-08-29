@@ -35,6 +35,30 @@ A single connection works too — `request()` sets aside any event that
 arrives mid-command and hands it to `next_event()` afterwards — but two is
 simpler to reason about.
 
+### From an event loop
+
+`fileno()` gives the control socket's descriptor, so a caller with its own
+loop can wait on events without a thread and without a poll interval:
+
+```python
+monitor = WpaCtrl("wlan0").open()
+monitor.attach()
+
+def on_readable():
+    while monitor.pending():          # one wakeup can mean several events
+        event = monitor.next_event()
+        if event is None:
+            break
+        handle(event)
+
+loop.add_reader(monitor.fileno(), on_readable)
+```
+
+Drain while `pending()` is true, since a readable socket can hold more than
+one datagram. Unregister the descriptor before `close()` — it is closed with
+the socket, and a loop still watching it will spin. Use a connection that is
+attached and does nothing else, so everything arriving is an event.
+
 ## Finding the interfaces
 
 `wlan0` is a default, not a promise: udev rules, systemd's predictable names
