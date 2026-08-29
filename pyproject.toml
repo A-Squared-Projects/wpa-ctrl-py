@@ -1,0 +1,47 @@
+[project]
+name = "wpa-ctrl"
+version = "0.1.0"
+description = "Pure-Python client for the wpa_supplicant/hostapd control interface"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Alex Kiernan", email = "alex.kiernan@gmail.com" }]
+maintainers = [{ name = "A-Squared Projects" }]
+keywords = ["wpa_supplicant", "hostapd", "wifi", "wpa_cli", "ctrl_iface"]
+# vermin puts the code itself at 3.6 (f-strings, variable annotations) and
+# it is really 3.6.1, since the NamedTuple classes here carry properties and
+# methods on the class syntax arrived then. 3.7 is the declared floor
+# regardless: dict ordering is only guaranteed from 3.7, and parse_variables
+# returns pairs in the order the daemon sent them
+requires-python = ">=3.7"
+dependencies = []
+
+[project.urls]
+"Protocol documentation" = "https://w1.fi/cgit/hostap/tree/doc/ctrl_iface.doxygen"
+
+[build-system]
+# 77 for the SPDX license expression above
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["wpa_ctrl"]
+
+[tool.uv]
+package = true
+
+[dependency-groups]
+dev = ["ruff>=0.6"]
+
+[tool.ruff]
+# 88 (the default) splits too many of the f-string log lines here for the
+# sake of it
+line-length = 100
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, pyupgrade-safe subset, bugbear
+select = ["E", "F", "I", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# The test helper is imported for its side effect of being on the path
+"tests/*" = ["E402"]
