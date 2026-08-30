@@ -241,6 +241,43 @@ wpa.dpp_auth_init(peer=peer, conf="sta-psk", ssid=ssid_hex,
                   pass_=passphrase_hex)
 ```
 
+### Describing the network to hand over
+
+The `conf=`, `ssid=` and `pass=` parameters above are the ones easiest to get
+wrong, and the control interface reports none of it: a command with an empty
+or unencoded field is accepted, and the exchange is built and torn down later
+with no event and no log line. `dpp_configurator_params()` builds them, and
+refuses rather than producing a string that will fail silently:
+
+```python
+from wpa_ctrl import DppConf, dpp_channel, dpp_configurator_params
+
+params = dpp_configurator_params(DppConf.STA_PSK_SAE, ssid,
+                                 passphrase=passphrase,
+                                 configurator=configurator)
+# conf=sta-psk-sae ssid=6578616d706c65 pass=... configurator=1
+
+wpa.set("dpp_configurator_params", params)   # answering a chirp
+wpa.dpp_pkex_add(own=bootstrap, init=1, code=code, **...)
+```
+
+`passphrase=` and `psk=` are deliberately different arguments. SAE derives
+from the passphrase itself, so a passphrase serves WPA2 and WPA3 while a
+derived 64-character key can only ever serve WPA2 — and only the passphrase
+is hex-encoded, the key being hex already. Supplying both, neither, or a
+passphrase where a key belongs raises rather than provisioning something
+that cannot work.
+
+`DppConf` names the `conf=` values. The choice decides which AKMs the
+provisioned network offers, and a wrong one is invisible: an Enrollee given
+`sta-psk` associates over WPA2 against an access point that would have
+offered SAE, and stays there, because a stored network is never rewritten.
+
+`dpp_channel()` converts a frequency to the `81/6` form a bootstrapping URI
+carries. A peer announces itself on the channel its own URI names, so a
+listener anywhere else hears nothing — a failure indistinguishable from a
+peer that never announced.
+
 Progress arrives as events — `DPP-AUTH-SUCCESS`, `DPP-CONF-RECEIVED`,
 `DPP-CONF-SENT`, `DPP-FAILED` and the rest of the 43 in `wpa_ctrl.events` —
 so an onboarding flow wants an attached connection alongside the one issuing

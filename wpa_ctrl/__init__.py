@@ -32,6 +32,7 @@
 # @file __init__.py
 
 from .client import (
+                     DppConf,
                      KeyMgmt,
                      Network,
                      Pmf,
@@ -39,6 +40,9 @@ from .client import (
                      ScanResult,
                      Security,
                      WpaCtrl,
+                     dpp_channel,
+                     dpp_configurator_params,
+                     dpp_hex,
                      format_params,
                      parse_security,
                      parse_table,
@@ -66,6 +70,7 @@ from .transport import (
 
 __all__ = [
     "CtrlTransport",
+    "DppConf",
     "SYS_CLASS_NET",
     "DEFAULT_CLIENT_DIR",
     "DEFAULT_CTRL_DIR",
@@ -84,6 +89,9 @@ __all__ = [
     "WpaCtrlError",
     "WpaCtrlTimeout",
     "control_sockets",
+    "dpp_channel",
+    "dpp_configurator_params",
+    "dpp_hex",
     "format_params",
     "find_interfaces",
     "have_sysfs",
