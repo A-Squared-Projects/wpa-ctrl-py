@@ -167,6 +167,48 @@ its other commands — `STA`, `ALL_STA`, `DEAUTHENTICATE`, `GET_CONFIG`, the
 ap.request("ALL_STA")
 ```
 
+## What an AP offers
+
+The `flags` column of a scan result is a compact spelling of the BSS's
+RSN/WPA information elements. `ScanResult.security` parses it, and
+`parse_security()` does the same for a flags string on its own:
+
+```python
+for result in wpa.scan_results():
+    security = result.security
+    if security.transition_mode:
+        print(f"{result.ssid}: WPA2 and WPA3 together")
+    elif security.sae_only:
+        print(f"{result.ssid}: WPA3 only")
+    elif security.psk:
+        print(f"{result.ssid}: WPA2")
+    elif security.open:
+        print(f"{result.ssid}: open")
+```
+
+`psk`, `sae`, `enterprise`, `owe`, `open` and `wep` say what is on offer;
+`transition_mode` and `sae_only` distinguish the two ways an AP can present
+SAE, which is the distinction that decides how a network has to be
+configured. `pmf_required` and `pmf_capable` report the `MFPR`/`MFPC` flags.
+`key_mgmt` and `protocols` hold the parsed names for anything the
+predicates do not cover, and `flags` keeps every group that was not one of
+those, so a name added upstream is visible rather than discarded.
+
+Two vocabularies are in play and they are not the same. A scan result
+spells WPA2 Personal `PSK`, while the `key_mgmt` network variable and
+`GET_CAPABILITY key_mgmt` spell it `WPA-PSK`. `Security.key_mgmt` reports
+the first; `KeyMgmt` holds the second, for configuring a network:
+
+```python
+if wpa.supports_key_mgmt(KeyMgmt.SAE):        # i.e. built with CONFIG_SAE
+    wpa.set_network(net, "key_mgmt", f"{KeyMgmt.WPA_PSK} {KeyMgmt.SAE}")
+    wpa.set_network(net, "ieee80211w", Pmf.OPTIONAL)
+```
+
+`Pmf` holds the `ieee80211w` values: `DISABLED`, `OPTIONAL`, `REQUIRED`.
+SAE requires management frame protection and WPA2 predates it, so a network
+that has to work with both wants `OPTIONAL` rather than either extreme.
+
 ## DPP (Wi-Fi Easy Connect)
 
 Both daemons implement DPP, and all 29 of its commands have methods. The

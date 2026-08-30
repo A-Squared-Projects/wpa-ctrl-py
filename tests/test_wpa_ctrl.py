@@ -190,6 +190,21 @@ class TestParsing(WpaCtrlTestCase):
         self.assertEqual(self.make_client().get_capability("eap"),
                          ["TLS", "PEAP", "TTLS"])
 
+    ## The probe SAE support turns on: a build without CONFIG_SAE simply
+    ## does not list it, and setting key_mgmt SAE on one fails
+    def test_supports_key_mgmt(self):
+        self.start_server({"GET_CAPABILITY key_mgmt":
+                           "WPA-PSK WPA-EAP IEEE8021X NONE WPA-NONE FT-PSK "
+                           "FT-EAP SAE FT-SAE OWE DPP\n"})
+        client = self.make_client()
+        self.assertTrue(client.supports_key_mgmt("SAE"))
+        self.assertFalse(client.supports_key_mgmt("WPA-PSK-SHA256"))
+
+    def test_supports_key_mgmt_on_a_build_without_sae(self):
+        self.start_server({"GET_CAPABILITY key_mgmt":
+                           "WPA-PSK WPA-EAP IEEE8021X NONE WPA-NONE\n"})
+        self.assertFalse(self.make_client().supports_key_mgmt("SAE"))
+
     def test_interfaces(self):
         self.start_server({"INTERFACES": "wlan0\nwlan1\n"})
         self.assertEqual(self.make_client().interfaces(), ["wlan0", "wlan1"])
