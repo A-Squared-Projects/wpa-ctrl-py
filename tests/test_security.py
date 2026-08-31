@@ -13,7 +13,17 @@
 import unittest
 from unittest import TestCase
 
-from wpa_ctrl import KeyMgmt, Pmf, ScanResult, parse_security
+from wpa_ctrl import (
+    PASSPHRASE_MAX_LENGTH,
+    PASSPHRASE_MIN_LENGTH,
+    KeyMgmt,
+    Pmf,
+    ScanResult,
+    is_passphrase,
+    is_raw_psk,
+    parse_security,
+    psk_value,
+)
 
 
 def setUpModule():
@@ -187,6 +197,51 @@ class TestVocabulary(TestCase):
     def test_pmf_values(self):
         self.assertEqual((Pmf.DISABLED, Pmf.OPTIONAL, Pmf.REQUIRED),
                          ("0", "1", "2"))
+
+
+## The psk network variable takes a passphrase in quotes or the key itself
+#  as 64 hex digits unquoted, and the difference decides more than quoting:
+#  SAE derives from the password, so a raw key can only serve WPA2
+class TestPskSecrets(TestCase):
+
+    def test_a_normal_passphrase(self):
+        self.assertTrue(is_passphrase("a-good-passphrase"))
+        self.assertFalse(is_raw_psk("a-good-passphrase"))
+        self.assertEqual(psk_value("a-good-passphrase"), '"a-good-passphrase"')
+
+    ## WPA2's bounds are 8 and 63 inclusive
+    def test_the_length_boundaries(self):
+        self.assertTrue(is_passphrase("8" * PASSPHRASE_MIN_LENGTH))
+        self.assertTrue(is_passphrase("6" * PASSPHRASE_MAX_LENGTH))
+        self.assertFalse(is_passphrase("7" * (PASSPHRASE_MIN_LENGTH - 1)))
+        self.assertFalse(is_passphrase("6" * (PASSPHRASE_MAX_LENGTH + 1)))
+
+    def test_a_raw_key(self):
+        key = "0123456789abcdef" * 4
+        self.assertTrue(is_raw_psk(key))
+        self.assertFalse(is_passphrase(key))
+        self.assertEqual(psk_value(key), key)
+
+    def test_upper_case_hex_is_still_a_raw_key(self):
+        self.assertTrue(is_raw_psk("0123456789ABCDEF" * 4))
+
+    ## Length alone is not the test. 64 characters that are not all hex are
+    ## a passphrase - one WPA2 cannot take, but a password SAE can
+    def test_sixty_four_non_hex_characters(self):
+        secret = "x" * 64
+        self.assertFalse(is_raw_psk(secret))
+        self.assertFalse(is_passphrase(secret))
+        self.assertEqual(psk_value(secret), f'"{secret}"')
+
+    ## 63 hex digits is not a key, and quoting it is right
+    def test_a_near_miss_length(self):
+        self.assertFalse(is_raw_psk("a" * 63))
+        self.assertEqual(psk_value("a" * 63), '"' + "a" * 63 + '"')
+
+    ## Quoting a raw key gets it refused as an over-long passphrase, which
+    ## is the mistake psk_value exists to prevent
+    def test_a_raw_key_is_never_quoted(self):
+        self.assertNotIn('"', psk_value("f" * 64))
 
 
 if __name__ == '__main__':

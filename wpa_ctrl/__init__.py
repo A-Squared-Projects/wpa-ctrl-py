@@ -32,6 +32,8 @@
 # @file __init__.py
 
 from .client import (
+                     PASSPHRASE_MAX_LENGTH,
+                     PASSPHRASE_MIN_LENGTH,
                      DppConf,
                      KeyMgmt,
                      Network,
@@ -44,9 +46,12 @@ from .client import (
                      dpp_configurator_params,
                      dpp_hex,
                      format_params,
+                     is_passphrase,
+                     is_raw_psk,
                      parse_security,
                      parse_table,
                      parse_variables,
+                     psk_value,
                      quote,
 )
 from .discovery import (
@@ -79,6 +84,8 @@ __all__ = [
     "HOSTAPD_CTRL_DIR",
     "KeyMgmt",
     "Network",
+    "PASSPHRASE_MAX_LENGTH",
+    "PASSPHRASE_MIN_LENGTH",
     "Pmf",
     "PmksaEntry",
     "ScanResult",
@@ -96,12 +103,15 @@ __all__ = [
     "find_interfaces",
     "have_sysfs",
     "interface_path",
+    "is_passphrase",
+    "is_raw_psk",
     "is_wireless",
     "is_event",
     "parse_event",
     "parse_security",
     "parse_table",
     "parse_variables",
+    "psk_value",
     "quote",
     "wireless_interfaces",
 ]

@@ -364,6 +364,46 @@ def quote(value: str) -> str:
     return f'"{escaped}"'
 
 
+## The lengths WPA2 accepts for a psk passphrase. SAE has no such limit -
+#  it derives its key from the password whatever the length - so a secret
+#  outside this range can still serve a WPA3 network, just not a WPA2 one
+PASSPHRASE_MIN_LENGTH = 8
+PASSPHRASE_MAX_LENGTH = 63
+
+## Spelled out rather than taken from string.hexdigits, to keep this package
+#  on the standard library imports its packaging already declares
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+
+
+## Whether a secret can serve as a WPA2 passphrase
+# @param secret the passphrase to check
+# @return True if wpa_supplicant will accept it as one
+def is_passphrase(secret: str) -> bool:
+    return PASSPHRASE_MIN_LENGTH <= len(secret) <= PASSPHRASE_MAX_LENGTH
+
+
+## Whether a secret is a raw 256-bit key rather than a passphrase.
+#
+#  The psk network variable takes either: a passphrase in quotes, or the key
+#  itself as 64 hex digits, unquoted. The distinction decides more than
+#  quoting - SAE derives its key from the password, so a raw key can only
+#  ever serve WPA2, and offering it to SAE advertises something the station
+#  cannot do
+# @param secret the value destined for psk
+# @return True if it is a key rather than a passphrase
+def is_raw_psk(secret: str) -> bool:
+    return len(secret) == 64 and all(c in _HEX_DIGITS for c in secret)
+
+
+## The wire form of a secret for the psk network variable: a raw key
+#  unquoted, anything else quoted. Quoting a raw key gets it refused as an
+#  over-long passphrase, which is the mistake this exists to prevent
+# @param secret the passphrase or raw key
+# @return the value to send
+def psk_value(secret: str) -> str:
+    return secret if is_raw_psk(secret) else quote(secret)
+
+
 ## Parse a variable=value block (STATUS, MIB, BSS, ...) into a dict.
 #  Lines without an "=" are skipped rather than guessed at
 # @param reply the raw reply text
