@@ -1148,15 +1148,48 @@ class WpaCtrl:
     # Networks
     # ------------------------------------------------------------------
 
-    ## The configured networks
-    def list_networks(self) -> List[Network]:
+    ## Parse LIST_NETWORKS rows, dropping what does not parse
+    @staticmethod
+    def _parse_networks(reply: str) -> List[Network]:
         networks = []
-        for row in parse_table(self.request("LIST_NETWORKS"), 4):
+        for row in parse_table(reply, 4):
             try:
                 networks.append(Network(int(row[0]), row[1], row[2], row[3]))
             except ValueError:
                 logger.debug(f"Ignoring unparsable network row: {row!r}")
         return networks
+
+    ## The configured networks - as many as fit one reply. A reply is one
+    #  datagram, so a long list is cut short with no sign the rest exist;
+    #  iter_networks() walks past that
+    def list_networks(self) -> List[Network]:
+        return self._parse_networks(self.request("LIST_NETWORKS"))
+
+    ## Every configured network, however many there are.
+    #
+    #  The daemon's LAST_ID= continuation exists for exactly the truncation
+    #  list_networks() suffers: ask again from the last id seen until a
+    #  page brings nothing new. wpa_cli itself never continues - the
+    #  feature is there for clients that do.
+    #
+    #  A generator like iter_bss(), and with the same guards: a page that
+    #  brings no id not already seen ends the walk, which also covers a
+    #  daemon old enough to answer the continuation with UNKNOWN COMMAND -
+    #  such a daemon simply yields its first page and stops, which is
+    #  every network it was ever going to show
+    def iter_networks(self) -> Iterator[Network]:
+        seen = set()
+        command = "LIST_NETWORKS"
+        while True:
+            new = [network
+                   for network in self._parse_networks(self.request(command))
+                   if network.id not in seen]
+            if not new:
+                return
+            for network in new:
+                seen.add(network.id)
+                yield network
+            command = f"LIST_NETWORKS LAST_ID={new[-1].id}"
 
     ## Create a new, empty, disabled network
     # @return the new network's id

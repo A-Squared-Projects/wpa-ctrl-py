@@ -253,6 +253,24 @@ mask:
 wpa.bss("CURRENT", mask=BssMask.SSID | BssMask.LEVEL)
 ```
 
+## However many networks
+
+`LIST_NETWORKS` answers in one datagram like `SCAN_RESULTS` does, so a
+long list is cut short with no sign the rest exist. The daemon's
+`LAST_ID=` continuation exists for exactly that, and `iter_networks()`
+walks it — a generator like `iter_bss()`, asking again from the last id
+seen until a page brings nothing new:
+
+```python
+for network in wpa.iter_networks():
+    print(network.id, network.ssid_text, network.current)
+```
+
+`list_networks()` remains the single-reply form. A daemon too old for
+`LAST_ID=` answers the continuation with `UNKNOWN COMMAND`, and the walk
+simply ends with the first page — every network such a daemon was ever
+going to show.
+
 ## SSIDs are octet strings
 
 802.11 says nothing about what the 0–32 bytes of an SSID mean. A person's

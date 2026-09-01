@@ -393,6 +393,52 @@ class TestIterBss(WpaCtrlTestCase):
         self.assertIsNone(info.ssid_text)
 
 
+## The LIST_NETWORKS LAST_ID= walk, for a list that outgrows one reply.
+#  Ids are non-contiguous here for the same reason as the BSS fixtures:
+#  removal leaves holes
+class TestIterNetworks(WpaCtrlTestCase):
+
+    HEADER = "network id / ssid / bssid / flags\n"
+
+    def test_walks_by_last_id_until_a_page_brings_nothing(self):
+        server = self.start_server({
+            "LIST_NETWORKS": self.HEADER + "0\thome\tany\t[CURRENT]\n"
+                                           "1\twork\tany\t\n",
+            "LIST_NETWORKS LAST_ID=1": self.HEADER + "5\tguest\tany\t[DISABLED]\n",
+            "LIST_NETWORKS LAST_ID=5": self.HEADER,
+        })
+        networks = list(self.make_client().iter_networks())
+        self.assertEqual([n.id for n in networks], [0, 1, 5])
+        self.assertEqual([n.ssid for n in networks], ["home", "work", "guest"])
+        self.assertEqual(server.received,
+                         ["LIST_NETWORKS", "LIST_NETWORKS LAST_ID=1",
+                          "LIST_NETWORKS LAST_ID=5"])
+
+    ## A daemon too old for LAST_ID= answers UNKNOWN COMMAND; the walk
+    #  ends with the first page, which is every network it would ever show
+    def test_a_daemon_without_last_id_yields_one_page(self):
+        self.start_server({
+            "LIST_NETWORKS": self.HEADER + "0\thome\tany\t\n",
+            "LIST_NETWORKS LAST_ID=0": "UNKNOWN COMMAND\n",
+        })
+        networks = list(self.make_client().iter_networks())
+        self.assertEqual([n.id for n in networks], [0])
+
+    def test_stopping_early_sends_no_further_commands(self):
+        server = self.start_server({
+            "LIST_NETWORKS": self.HEADER + "0\thome\tany\t\n"
+                                           "1\twork\tany\t\n",
+        })
+        for network in self.make_client().iter_networks():
+            self.assertEqual(network.ssid, "home")
+            break
+        self.assertEqual(server.received, ["LIST_NETWORKS"])
+
+    def test_empty_list(self):
+        self.start_server({"LIST_NETWORKS": self.HEADER})
+        self.assertEqual(list(self.make_client().iter_networks()), [])
+
+
 ## The SSID type: octets first, text only when the octets are UTF-8
 class TestSsid(TestCase):
 
