@@ -295,6 +295,17 @@ single-entry forms, answering `None` where there is no such entry. A
 station's `flags` speak hostapd's vocabulary (`[AUTH][ASSOC]...`), not
 the BSS one, so `parse_security()` does not apply to them.
 
+## Signal
+
+`signal_poll()` returns a `SignalPoll`: the dict of what the daemon sent,
+with `rssi`, `linkspeed`, `noise`, `frequency`, `width` and the rest
+typed. Two sentinels are encoded so no caller has to learn them by being
+burnt: the daemon spells "no reading" as `NOISE=9999` and `RSSI=-9999`
+(`WPA_INVALID_NOISE`), and both answer `None` rather than a level no
+radio could report. Not associated is not a variable at all — the command
+answers `FAIL`, which parses to an empty `SignalPoll` whose every
+property is `None`.
+
 ## SSIDs are octet strings
 
 802.11 says nothing about what the 0–32 bytes of an SSID mean. A person's

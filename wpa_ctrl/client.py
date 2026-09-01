@@ -551,6 +551,85 @@ class ScanResult(NamedTuple):
         return self.ssid_bytes.text
 
 
+## Shared base of the variable-block replies (Status, Bss, SignalPoll):
+#  a dict of exactly what the daemon sent, with the int parsing the typed
+#  properties share. A property answers None for a field that was not
+#  reported, and raises ValueError for one that is present but not in
+#  the daemon's own format
+class _Variables(Dict[str, str]):
+
+    def _int(self, key: str, base: int = 10) -> Optional[int]:
+        value = self.get(key)
+        return None if value is None else int(value, base)
+
+
+## The daemon's "no reading" sentinel: WPA_INVALID_NOISE in driver.h.
+#  SIGNAL_POLL spells an unknown noise floor as NOISE=9999 and an unknown
+#  RSSI as RSSI=-9999, neither being a level any radio could report
+_INVALID_NOISE = 9999
+
+
+## The SIGNAL_POLL reply: the current association's signal, typed.
+#
+#  RSSI, LINKSPEED, NOISE and FREQUENCY are always present in a
+#  successful reply - the daemon prints all four in one block - so a
+#  caller never sees some of them missing. What it sees instead, when
+#  there is no association to measure, is FAIL for the whole command,
+#  which parses to an empty SignalPoll whose every property is None.
+#  WIDTH, the center frequencies and the averages are genuinely
+#  conditional: absent when the driver does not report them
+class SignalPoll(_Variables):
+
+    ## dBm. None for the daemon's -9999, which means "no reading", not a
+    #  signal 9999 dB below a milliwatt
+    @property
+    def rssi(self) -> Optional[int]:
+        value = self._int("RSSI")
+        return None if value == -_INVALID_NOISE else value
+
+    ## Mbps
+    @property
+    def linkspeed(self) -> Optional[int]:
+        return self._int("LINKSPEED")
+
+    ## dBm. None for the daemon's 9999, which means the driver cannot
+    #  measure the noise floor, not a floor of +9999 dBm
+    @property
+    def noise(self) -> Optional[int]:
+        value = self._int("NOISE")
+        return None if value == _INVALID_NOISE else value
+
+    ## MHz
+    @property
+    def frequency(self) -> Optional[int]:
+        return self._int("FREQUENCY")
+
+    ## The channel width as the daemon spells it, e.g. "80 MHz"
+    @property
+    def width(self) -> Optional[str]:
+        return self.get("WIDTH")
+
+    ## MHz
+    @property
+    def center_frq1(self) -> Optional[int]:
+        return self._int("CENTER_FRQ1")
+
+    ## MHz
+    @property
+    def center_frq2(self) -> Optional[int]:
+        return self._int("CENTER_FRQ2")
+
+    ## dBm
+    @property
+    def avg_rssi(self) -> Optional[int]:
+        return self._int("AVG_RSSI")
+
+    ## dBm
+    @property
+    def avg_beacon_rssi(self) -> Optional[int]:
+        return self._int("AVG_BEACON_RSSI")
+
+
 ## The STATUS reply: the variable=value block as a dict, with the SSID
 #  octet accessors.
 #
@@ -560,7 +639,7 @@ class ScanResult(NamedTuple):
 #  wpa_ssid_txt() like everything else's, so it is the wire's escaped
 #  ASCII; matching it against a config file's ssid= is an octets
 #  comparison, Ssid.from_printf() against Ssid.from_config()
-class Status(Dict[str, str]):
+class Status(_Variables):
 
     ## The SSID as the octet string the air carried - see
     #  ScanResult.ssid_bytes. None when there is no ssid field, i.e. not
@@ -601,11 +680,7 @@ class Status(Dict[str, str]):
 #  The wps_* fields are already the strings they look like. The RNR and ML
 #  masks produce prose lines rather than variables; they land in the dict
 #  under whatever precedes their first "=", unlovely but not lost
-class Bss(Dict[str, str]):
-
-    def _int(self, key: str, base: int = 10) -> Optional[int]:
-        value = self.get(key)
-        return None if value is None else int(value, base)
+class Bss(_Variables):
 
     ## The daemon's id for this entry, stable while the entry lives -
     #  which is what iter_bss() walks on
@@ -1631,9 +1706,10 @@ class WpaCtrl:
     # used, and the document has not kept pace with the daemon
     # ------------------------------------------------------------------
 
-    ## Signal strength of the current connection
-    def signal_poll(self) -> Dict[str, str]:
-        return parse_variables(self.request("SIGNAL_POLL"))
+    ## Signal strength of the current connection. Not associated answers
+    #  FAIL, which parses to an empty SignalPoll - every property None
+    def signal_poll(self) -> SignalPoll:
+        return SignalPoll(parse_variables(self.request("SIGNAL_POLL")))
 
     ## How many scans a BSS may go unseen before it is dropped from the
     #  scan results cache

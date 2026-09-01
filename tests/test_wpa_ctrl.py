@@ -232,6 +232,45 @@ class TestParsing(WpaCtrlTestCase):
         self.assertIsNone(status.ssid_bytes)
         self.assertIsNone(status.ssid_text)
 
+    ## SIGNAL_POLL prints RSSI, LINKSPEED, NOISE and FREQUENCY in one
+    #  unconditional block; WIDTH and the rest appear when the driver
+    #  reports them
+    def test_signal_poll_is_typed(self):
+        self.start_server({"SIGNAL_POLL":
+                           "RSSI=-60\nLINKSPEED=866\nNOISE=-95\n"
+                           "FREQUENCY=5180\nWIDTH=80 MHz\nCENTER_FRQ1=5210\n"
+                           "AVG_RSSI=-61\n"})
+        signal = self.make_client().signal_poll()
+        self.assertEqual(signal.rssi, -60)
+        self.assertEqual(signal.linkspeed, 866)
+        self.assertEqual(signal.noise, -95)
+        self.assertEqual(signal.frequency, 5180)
+        self.assertEqual(signal.width, "80 MHz")
+        self.assertEqual(signal.center_frq1, 5210)
+        self.assertIsNone(signal.center_frq2)
+        self.assertEqual(signal.avg_rssi, -61)
+        self.assertEqual(signal["RSSI"], "-60")   # still the dict
+
+    ## The daemon spells "no reading" as NOISE=9999 and RSSI=-9999
+    #  (WPA_INVALID_NOISE) - values no radio could report, which every
+    #  caller would otherwise have to learn by being burnt
+    def test_signal_poll_no_reading_sentinels(self):
+        self.start_server({"SIGNAL_POLL":
+                           "RSSI=-9999\nLINKSPEED=0\nNOISE=9999\n"
+                           "FREQUENCY=2412\n"})
+        signal = self.make_client().signal_poll()
+        self.assertIsNone(signal.rssi)
+        self.assertIsNone(signal.noise)
+        self.assertEqual(signal["NOISE"], "9999")  # the raw value survives
+
+    ## Not associated is not a variable: the whole command answers FAIL
+    def test_signal_poll_when_not_associated(self):
+        self.start_server({"SIGNAL_POLL": "FAIL\n"})
+        signal = self.make_client().signal_poll()
+        self.assertEqual(signal, {})
+        self.assertIsNone(signal.rssi)
+        self.assertIsNone(signal.frequency)
+
     ## LIST_NETWORKS prints the name printf-escaped like everything else,
     #  so Network carries the octet accessors too
     def test_network_ssid_decoding(self):
