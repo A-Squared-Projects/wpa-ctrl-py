@@ -439,6 +439,76 @@ class TestIterNetworks(WpaCtrlTestCase):
         self.assertEqual(list(self.make_client().iter_networks()), [])
 
 
+## The STA-FIRST / STA-NEXT walk hostapd_cli's all_sta performs, and the
+#  P2P_PEER FIRST / NEXT- walk of wpa_cli's p2p_peers. Both replies put
+#  the MAC alone on the first line, which a plain variable parse would
+#  silently drop
+class TestIterStations(WpaCtrlTestCase):
+
+    STA_1 = "02:00:00:00:01:00\nflags=[AUTH][ASSOC][AUTHORIZED]\naid=1\n"
+    STA_2 = "02:00:00:00:02:00\nflags=[AUTH][ASSOC]\naid=2\n"
+
+    def test_walks_until_the_reply_is_empty(self):
+        server = self.start_server({
+            "STA-FIRST": self.STA_1,
+            "STA-NEXT 02:00:00:00:01:00": self.STA_2,
+            "STA-NEXT 02:00:00:00:02:00": "",
+        })
+        stations = list(self.make_client().iter_stations())
+        self.assertEqual([s.address for s in stations],
+                         ["02:00:00:00:01:00", "02:00:00:00:02:00"])
+        self.assertEqual(stations[0]["aid"], "1")
+        self.assertEqual(server.received,
+                         ["STA-FIRST", "STA-NEXT 02:00:00:00:01:00",
+                          "STA-NEXT 02:00:00:00:02:00"])
+
+    ## wpa_supplicant without AP/mesh support answers FAIL or UNKNOWN
+    #  COMMAND; neither parses as an address, so the walk just ends
+    def test_a_daemon_without_stations_yields_nothing(self):
+        self.start_server({"STA-FIRST": "UNKNOWN COMMAND\n"})
+        self.assertEqual(list(self.make_client().iter_stations()), [])
+
+    def test_sta_by_address(self):
+        self.start_server({"STA 02:00:00:00:01:00": self.STA_1})
+        station = self.make_client().sta("02:00:00:00:01:00")
+        self.assertEqual(station.address, "02:00:00:00:01:00")
+        self.assertEqual(station["flags"], "[AUTH][ASSOC][AUTHORIZED]")
+
+    def test_sta_answers_none_for_no_such_station(self):
+        self.start_server({"STA 02:00:00:00:09:00": "FAIL\n"})
+        self.assertIsNone(self.make_client().sta("02:00:00:00:09:00"))
+
+
+class TestIterP2pPeers(WpaCtrlTestCase):
+
+    PEER = ("02:00:00:00:03:00\nage=5\ndevice_name=printer\n"
+            "config_methods=0x188\n")
+
+    def test_walks_until_fail(self):
+        server = self.start_server({
+            "P2P_PEER FIRST": self.PEER,
+            "P2P_PEER NEXT-02:00:00:00:03:00": "FAIL\n",
+        })
+        peers = list(self.make_client().iter_p2p_peers())
+        self.assertEqual([p.address for p in peers], ["02:00:00:00:03:00"])
+        self.assertEqual(peers[0]["device_name"], "printer")
+        self.assertEqual(server.received,
+                         ["P2P_PEER FIRST",
+                          "P2P_PEER NEXT-02:00:00:00:03:00"])
+
+    ## The address is the reply's first line; the old variable parse
+    #  dropped it because it has no "="
+    def test_p2p_peer_keeps_the_address(self):
+        self.start_server({"P2P_PEER 02:00:00:00:03:00": self.PEER})
+        peer = self.make_client().p2p_peer("02:00:00:00:03:00")
+        self.assertEqual(peer.address, "02:00:00:00:03:00")
+        self.assertEqual(peer["age"], "5")
+
+    def test_p2p_peer_answers_none_for_no_such_peer(self):
+        self.start_server({"P2P_PEER 02:00:00:00:09:00": "FAIL\n"})
+        self.assertIsNone(self.make_client().p2p_peer("02:00:00:00:09:00"))
+
+
 ## The SSID type: octets first, text only when the octets are UTF-8
 class TestSsid(TestCase):
 

@@ -159,9 +159,10 @@ does.
 What the typed command surface below covers is wpa_supplicant's documented
 commands. hostapd's own `hostapd_ctrl_iface.doxygen` documents exactly one
 command, `PING`, so there is nothing else there to implement faithfully;
-its other commands — `STA`, `ALL_STA`, `DEAUTHENTICATE`, `GET_CONFIG`, the
-`WPS_*` family — are documented only in `hostapd_cli.c`, and go through
-`request()`:
+its other commands — `DEAUTHENTICATE`, `GET_CONFIG`, the `WPS_*` family —
+are documented only in `hostapd_cli.c`, and go through `request()`. The
+`STA` family is the exception: wpa_supplicant answers it too in AP and
+mesh modes, and `sta()` / `iter_stations()` below cover it.
 
 ```python
 ap.request("ALL_STA")
@@ -270,6 +271,29 @@ for network in wpa.iter_networks():
 `LAST_ID=` answers the continuation with `UNKNOWN COMMAND`, and the walk
 simply ends with the first page — every network such a daemon was ever
 going to show.
+
+## Stations, and P2P peers
+
+The same one-entry-per-datagram walk serves two more tables, and the CLIs
+iterate both themselves. `iter_stations()` is `hostapd_cli all_sta` —
+`STA-FIRST`, then `STA-NEXT <address>` until the reply is empty — and
+works against hostapd or a wpa_supplicant in AP or mesh mode; anything
+else answers the first command with `UNKNOWN COMMAND` and the walk simply
+yields nothing. `iter_p2p_peers()` is `wpa_cli p2p_peers`: `P2P_PEER
+FIRST`, then `P2P_PEER NEXT-<address>` until `FAIL`:
+
+```python
+with WpaCtrl("wlan0", ctrl_dir=HOSTAPD_CTRL_DIR) as ap:
+    for station in ap.iter_stations():
+        print(station.address, station["flags"])
+```
+
+Both replies put the MAC alone on the reply's first line — not as a
+variable — so `Station` and `P2pPeer` carry it as `.address` beside the
+dict of what the daemon sent. `sta()` and `p2p_peer()` are the
+single-entry forms, answering `None` where there is no such entry. A
+station's `flags` speak hostapd's vocabulary (`[AUTH][ASSOC]...`), not
+the BSS one, so `parse_security()` does not apply to them.
 
 ## SSIDs are octet strings
 

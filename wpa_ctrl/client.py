@@ -722,6 +722,56 @@ class Bss(Dict[str, str]):
         return None if value is None else bytes.fromhex(value)
 
 
+## Whether text is a MAC address as the control interface spells one
+def _is_address(text: str) -> bool:
+    parts = text.split(":")
+    return (len(parts) == 6
+            and all(len(part) == 2 and part[0] in _HEX_DIGITS
+                    and part[1] in _HEX_DIGITS for part in parts))
+
+
+## Split an address-headed reply (STA, P2P_PEER): the daemon puts the MAC
+#  alone on the first line and the variables under it. FAIL, UNKNOWN
+#  COMMAND and an empty reply all mean "no such entry", and none of them
+#  parse as an address, which is the one check that covers them all
+# @param reply the raw reply text
+# @return (address, variables), or (None, {}) when there is no entry
+def _addressed_variables(reply: str):
+    line, _, rest = reply.partition("\n")
+    address = line.strip()
+    if _is_address(address):
+        return address, parse_variables(rest)
+    return None, {}
+
+
+## One station, as the STA commands report it - hostapd's bread and
+#  butter, and wpa_supplicant answers the same commands in AP and mesh
+#  modes.
+#
+#  A dict of whatever the daemon sent, like Bss and for the same reason.
+#  The address rides as an attribute because the daemon does not send it
+#  as a variable - it is the first line of the reply, alone - and
+#  inventing an address= the wire never carried would misdescribe the
+#  reply. Note the flags variable here speaks hostapd's station
+#  vocabulary ([AUTH][ASSOC][AUTHORIZED]...), not the BSS one, so
+#  parse_security does not apply
+class Station(Dict[str, str]):
+
+    def __init__(self, address: str, variables: Dict[str, str]):
+        super().__init__(variables)
+        self.address = address
+
+
+## One P2P peer, as P2P_PEER reports it: the device address alone on the
+#  first line, then variables (device_name, config_methods, ...). The
+#  address rides as an attribute for the same reason as Station's
+class P2pPeer(Dict[str, str]):
+
+    def __init__(self, address: str, variables: Dict[str, str]):
+        super().__init__(variables)
+        self.address = address
+
+
 ## One row of the PMKSA cache
 class PmksaEntry(NamedTuple):
     index: int
@@ -1191,6 +1241,29 @@ class WpaCtrl:
                 yield network
             command = f"LIST_NETWORKS LAST_ID={new[-1].id}"
 
+    ## One associated station, by MAC address. hostapd's command first,
+    #  but wpa_supplicant answers it too in AP and mesh modes
+    # @param address the station's MAC
+    # @return the station, or None if no such station is associated
+    def sta(self, address: str) -> Optional[Station]:
+        found, variables = _addressed_variables(self.request(f"STA {address}"))
+        return None if found is None else Station(found, variables)
+
+    ## Every associated station - the iteration hostapd_cli's all_sta
+    #  performs: STA-FIRST, then STA-NEXT <address> until the reply is
+    #  empty. A generator like iter_bss(), with the same guards, one
+    #  station per round trip
+    def iter_stations(self) -> Iterator[Station]:
+        seen = set()
+        command = "STA-FIRST"
+        while True:
+            address, variables = _addressed_variables(self.request(command))
+            if address is None or address in seen:
+                return
+            seen.add(address)
+            yield Station(address, variables)
+            command = f"STA-NEXT {address}"
+
     ## Create a new, empty, disabled network
     # @return the new network's id
     def add_network(self) -> int:
@@ -1348,9 +1421,29 @@ class WpaCtrl:
 
     ## Information about a discovered peer
     # @param selector the peer's address, FIRST, or NEXT-<address>
-    # @return the peer's variables, empty if there is no such peer
-    def p2p_peer(self, selector: str) -> Dict[str, str]:
-        return parse_variables(self.request(f"P2P_PEER {selector}"))
+    # @return the peer, or None if there is no such peer. The address is
+    #         the reply's first line, which a plain variable parse would
+    #         silently drop - it has no "=" - so this returns a P2pPeer
+    #         that carries it
+    def p2p_peer(self, selector: str) -> Optional[P2pPeer]:
+        address, variables = _addressed_variables(
+            self.request(f"P2P_PEER {selector}"))
+        return None if address is None else P2pPeer(address, variables)
+
+    ## Every P2P peer the device knows - the iteration wpa_cli's
+    #  p2p_peers performs: P2P_PEER FIRST, then P2P_PEER NEXT-<address>
+    #  until the daemon answers FAIL. A generator like iter_bss(), with
+    #  the same guards, one peer per round trip
+    def iter_p2p_peers(self) -> Iterator[P2pPeer]:
+        seen = set()
+        command = "P2P_PEER FIRST"
+        while True:
+            address, variables = _addressed_variables(self.request(command))
+            if address is None or address in seen:
+                return
+            seen.add(address)
+            yield P2pPeer(address, variables)
+            command = f"P2P_PEER NEXT-{address}"
 
     ## Extended listen timing. Called with neither argument, it turns the
     #  extended listen state off
