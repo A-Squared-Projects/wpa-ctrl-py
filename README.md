@@ -253,6 +253,34 @@ mask:
 wpa.bss("CURRENT", mask=BssMask.SSID | BssMask.LEVEL)
 ```
 
+## SSIDs are octet strings
+
+802.11 says nothing about what the 0–32 bytes of an SSID mean. A person's
+access point almost certainly holds UTF-8; an embedded system can put any
+bytes there at all. The daemon prints SSIDs printf-escaped — `Café`
+arrives as `Caf\xc3\xa9` — so the `ssid` a `ScanResult` or a `Bss`
+carries is that escaped ASCII, which matches against itself and is wrong
+to show to anyone.
+
+Both types carry the decoded forms alongside it. `ssid_bytes` is an
+`Ssid` — a `bytes` subclass, because the octets are the identity: it
+compares and hashes as the plain bytes do, so it drops into sets and dict
+keys unannounced. `ssid_text` (also spelled `Ssid.text`) reads those
+bytes as UTF-8 when they are UTF-8, and answers `None` when they are not,
+rather than a replacement-character rendering under which two different
+networks could look identical:
+
+```python
+result.ssid          # 'Caf\\xc3\\xa9' — the wire's escaped ASCII
+result.ssid_bytes    # Ssid(b'Caf\xc3\xa9') — what the air carried
+result.ssid_text     # 'Café' — or None for bytes that are not UTF-8
+```
+
+`Ssid.from_printf()` parses the escaped spelling anywhere else it turns
+up, and `printf_decode()` is the escape reversal on its own. The decoder
+speaks the daemon's whole dialect, including what its encoder never emits
+but its own decoder accepts, so both ends read the wire the same way.
+
 ## DPP (Wi-Fi Easy Connect)
 
 Both daemons implement DPP, and all 29 of its commands have methods. The

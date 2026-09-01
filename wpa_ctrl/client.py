@@ -377,6 +377,96 @@ def parse_security(flags: str) -> Security:
     return Security(frozenset(key_mgmt), frozenset(protocols), frozenset(others))
 
 
+## The named escapes of the daemon's printf-style encoding
+_PRINTF_ESCAPES = {"\\": b"\\", '"': b'"', "n": b"\n", "r": b"\r", "t": b"\t",
+                   "e": b"\x1b"}
+
+
+## Decode the printf-style escaping wpa_supplicant applies to octet strings
+#  on their way out - SSIDs above all. The daemon keeps printable ASCII and
+#  escapes everything else, so the wire form is pure ASCII and every byte
+#  outside it arrives as \xNN - whether it is half of a UTF-8 character or
+#  arbitrary binary. Undoing that yields bytes, not text: which bytes they
+#  are is only known once decoded, so decoding straight to characters would
+#  turn UTF-8 into mojibake.
+#
+#  The dialect is printf_encode()/printf_decode() in hostap's
+#  src/utils/common.c, including what the encoder never emits but the
+#  decoder accepts - a single-digit \xN, octal escapes, an unknown escape
+#  standing for its character, a \x with no digits or a trailing backslash
+#  dropped - so both ends read the wire the same way
+# @param text the escaped text
+# @return the octet string it encodes
+def printf_decode(text: str) -> bytes:
+    result = bytearray()
+    index = 0
+    while index < len(text):
+        char = text[index]
+        index += 1
+        if char != "\\":
+            result += char.encode()
+            continue
+        if index >= len(text):
+            break
+        escape = text[index]
+        if escape in _PRINTF_ESCAPES:
+            result += _PRINTF_ESCAPES[escape]
+            index += 1
+        elif escape == "x":
+            index += 1
+            digits = ""
+            while (index < len(text) and len(digits) < 2
+                   and text[index] in _HEX_DIGITS):
+                digits += text[index]
+                index += 1
+            if digits:
+                result.append(int(digits, 16))
+        elif "0" <= escape <= "7":
+            value = 0
+            digits = 0
+            while (index < len(text) and digits < 3
+                   and "0" <= text[index] <= "7"):
+                value = value * 8 + int(text[index])
+                index += 1
+                digits += 1
+            result.append(value & 0xFF)
+        else:
+            result += escape.encode()
+            index += 1
+    return bytes(result)
+
+
+## An SSID: the 0-32 octets the air carries, as a bytes subclass.
+#
+#  Its own type because the octets have one identity and several wire
+#  spellings - the daemon prints them printf-escaped, DPP takes a hexdump,
+#  a config file quotes them - and because what the octets mean is not the
+#  type's to decide: a person's SSID is almost always UTF-8, an embedded
+#  system's can be any bytes at all. Being bytes, it compares and hashes
+#  as the octets do, which is the only identity two spellings share
+class Ssid(bytes):
+
+    ## Parse the printf-escaped spelling the daemon uses on the way out,
+    #  e.g. the ssid field of a BSS reply or a SCAN_RESULTS row
+    # @param text the escaped text
+    # @return the SSID it spells
+    @classmethod
+    def from_printf(cls, text: str) -> 'Ssid':
+        return cls(printf_decode(text))
+
+    ## The UTF-8 reading, when there is one - a person's SSID almost
+    #  always is UTF-8, but 802.11 promises nothing. None otherwise,
+    #  rather than a replacement-character rendering under which two
+    #  different networks could look identical; the octets are always
+    #  the truth
+    @property
+    def text(self) -> Optional[str]:
+        try:
+            return self.decode()
+        except UnicodeDecodeError:
+            return None
+
+
 ## One row of SCAN_RESULTS
 class ScanResult(NamedTuple):
     bssid: str
@@ -390,6 +480,17 @@ class ScanResult(NamedTuple):
     def security(self) -> Security:
         return parse_security(self.flags)
 
+    ## The SSID as the octet string the air carried. ssid holds the wire's
+    #  escaped ASCII, which matches against itself and nothing else
+    @property
+    def ssid_bytes(self) -> Ssid:
+        return Ssid.from_printf(self.ssid)
+
+    ## The SSID as text when its bytes are UTF-8, None when they are
+    #  not - see Ssid.text
+    @property
+    def ssid_text(self) -> Optional[str]:
+        return self.ssid_bytes.text
 
 
 ## One BSS, as the BSS command reports it.
@@ -492,6 +593,20 @@ class Bss(Dict[str, str]):
     @property
     def ssid(self) -> Optional[str]:
         return self.get("ssid")
+
+    ## The SSID as the octet string the air carried - see
+    #  ScanResult.ssid_bytes
+    @property
+    def ssid_bytes(self) -> Optional[Ssid]:
+        value = self.get("ssid")
+        return None if value is None else Ssid.from_printf(value)
+
+    ## The SSID as text when its bytes are UTF-8, None when they are not -
+    #  see Ssid.text
+    @property
+    def ssid_text(self) -> Optional[str]:
+        value = self.ssid_bytes
+        return None if value is None else value.text
 
     @property
     def flags(self) -> Optional[str]:

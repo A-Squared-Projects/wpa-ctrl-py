@@ -21,6 +21,7 @@ from wpa_ctrl import (
     HOSTAPD_CTRL_DIR,
     BssMask,
     Event,
+    Ssid,
     WpaCtrl,
     WpaCtrlCommandFailed,
     WpaCtrlConnectionError,
@@ -28,6 +29,7 @@ from wpa_ctrl import (
     compat,
     interface_path,
     parse_event,
+    printf_decode,
     quote,
 )
 
@@ -210,6 +212,15 @@ class TestParsing(WpaCtrlTestCase):
         self.start_server({"INTERFACES": "wlan0\nwlan1\n"})
         self.assertEqual(self.make_client().interfaces(), ["wlan0", "wlan1"])
 
+    def test_scan_result_ssid_decoding(self):
+        self.start_server({"SCAN_RESULTS":
+                           "bssid / frequency / signal level / flags / ssid\n"
+                           "00:11:22:33:44:55\t2412\t-45\t[]\tCaf\\xc3\\xa9\n"})
+        result = self.make_client().scan_results()[0]
+        self.assertIsInstance(result.ssid_bytes, Ssid)
+        self.assertEqual(result.ssid_bytes, "Café".encode())
+        self.assertEqual(result.ssid_text, "Café")
+
     ## Rows that make no sense are dropped, not raised: a caller asking for
     #  scan results wants the ones that parsed
     def test_unparsable_rows_are_skipped(self):
@@ -329,6 +340,74 @@ class TestIterBss(WpaCtrlTestCase):
         self.assertEqual(info.bssid, "02:00:01:02:03:04")
         self.assertIsNone(info.frequency)
         self.assertIsNone(info.security)
+
+    ## An SSID is an octet string that the daemon escapes into ASCII on
+    #  its way out. ssid_bytes undoes that; ssid_text reads the bytes as
+    #  UTF-8, which a person's SSID almost always is
+    def test_ssid_bytes_and_text(self):
+        self.start_server({"BSS CURRENT": "id=0\nssid=Caf\\xc3\\xa9\n"})
+        info = self.make_client().bss("CURRENT")
+        self.assertEqual(info.ssid, "Caf\\xc3\\xa9")
+        self.assertIsInstance(info.ssid_bytes, Ssid)
+        self.assertEqual(info.ssid_bytes, "Café".encode())
+        self.assertEqual(info.ssid_text, "Café")
+
+    ## Arbitrary binary is a legal SSID. The bytes are always the truth;
+    #  text answers None rather than a replacement-character rendering
+    #  under which two different networks could look identical
+    def test_binary_ssid_has_no_text(self):
+        self.start_server({"BSS CURRENT": "id=0\nssid=\\x00\\xff\\xfe\n"})
+        info = self.make_client().bss("CURRENT")
+        self.assertEqual(info.ssid_bytes, b"\x00\xff\xfe")
+        self.assertIsNone(info.ssid_text)
+
+
+## The SSID type: octets first, text only when the octets are UTF-8
+class TestSsid(TestCase):
+
+    ## An Ssid is its octets - equal to, and hashing as, the plain bytes,
+    #  so it drops into sets, dict keys and comparisons unannounced
+    def test_is_its_bytes(self):
+        self.assertEqual(Ssid(b"example"), b"example")
+        self.assertIn(Ssid(b"example"), {b"example"})
+
+    def test_from_printf(self):
+        self.assertEqual(Ssid.from_printf("Caf\\xc3\\xa9"), "Café".encode())
+
+    def test_text_reads_utf8(self):
+        self.assertEqual(Ssid("Café".encode()).text, "Café")
+        self.assertEqual(Ssid(b"plain").text, "plain")
+
+    def test_text_refuses_what_is_not_utf8(self):
+        self.assertIsNone(Ssid(b"\xff\xfe").text)
+
+
+## The inverse of the printf-style escaping the daemon applies to octet
+#  strings on their way out. No server: this is a pure function
+class TestPrintfDecode(TestCase):
+
+    def test_printable_ascii_passes_through(self):
+        self.assertEqual(printf_decode("plain name"), b"plain name")
+
+    def test_named_escapes(self):
+        self.assertEqual(printf_decode('a\\"b\\\\c\\e\\n\\r\\t'),
+                         b'a"b\\c\x1b\n\r\t')
+
+    def test_hex_escapes(self):
+        self.assertEqual(printf_decode("Caf\\xc3\\xa9"), "Café".encode())
+        self.assertEqual(printf_decode("\\x00\\xff"), b"\x00\xff")
+
+    ## The daemon's decoder reads more than its encoder ever emits: a
+    #  single-digit \xN, octal, an unknown escape standing for its
+    #  character, a digitless \x or trailing backslash dropped. Both ends
+    #  should read the wire the same way
+    def test_dialect_edge_cases(self):
+        self.assertEqual(printf_decode("\\x5z"), b"\x05z")
+        self.assertEqual(printf_decode("\\xzz"), b"zz")
+        self.assertEqual(printf_decode("\\q"), b"q")
+        self.assertEqual(printf_decode("\\101\\60"), b"A0")
+        self.assertEqual(printf_decode("\\0053"), b"\x053")
+        self.assertEqual(printf_decode("end\\"), b"end")
 
 
 class TestNetworkCommands(WpaCtrlTestCase):
