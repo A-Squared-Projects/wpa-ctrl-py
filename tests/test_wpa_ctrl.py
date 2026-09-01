@@ -212,6 +212,17 @@ class TestParsing(WpaCtrlTestCase):
         self.start_server({"INTERFACES": "wlan0\nwlan1\n"})
         self.assertEqual(self.make_client().interfaces(), ["wlan0", "wlan1"])
 
+    ## LIST_NETWORKS prints the name printf-escaped like everything else,
+    #  so Network carries the octet accessors too
+    def test_network_ssid_decoding(self):
+        self.start_server({"LIST_NETWORKS":
+                           "network id / ssid / bssid / flags\n"
+                           "0\tCaf\\xc3\\xa9\tany\t[CURRENT]\n"})
+        network = self.make_client().list_networks()[0]
+        self.assertIsInstance(network.ssid_bytes, Ssid)
+        self.assertEqual(network.ssid_bytes, "Café".encode())
+        self.assertEqual(network.ssid_text, "Café")
+
     def test_scan_result_ssid_decoding(self):
         self.start_server({"SCAN_RESULTS":
                            "bssid / frequency / signal level / flags / ssid\n"

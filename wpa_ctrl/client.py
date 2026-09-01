@@ -48,6 +48,20 @@ class Network(NamedTuple):
     def disabled(self) -> bool:
         return "[DISABLED]" in self.flags
 
+    ## The SSID as the octet string it configures. LIST_NETWORKS prints
+    #  the name printf-escaped like a scan result does, so ssid holds the
+    #  wire's escaped ASCII - and matching a configured network against a
+    #  scanned or associated one is an octets comparison, not a text one
+    @property
+    def ssid_bytes(self) -> 'Ssid':
+        return Ssid.from_printf(self.ssid)
+
+    ## The SSID as text when its bytes are UTF-8, None when they are
+    #  not - see Ssid.text
+    @property
+    def ssid_text(self) -> Optional[str]:
+        return self.ssid_bytes.text
+
 
 ## Key management suites, spelled the way the key_mgmt network variable and
 #  GET_CAPABILITY key_mgmt spell them.
