@@ -56,6 +56,15 @@ class TestChannel(unittest.TestCase):
         self.assertEqual(dpp_channel(5500), "121/100")
         self.assertEqual(dpp_channel(5745), "125/149")
 
+    ## 6 GHz: class 131 holds the 20 MHz primaries; 5935 is class 136's
+    ## lone channel 2
+    def test_the_six_gigahertz_channels(self):
+        self.assertEqual(dpp_channel(5955), "131/1")
+        self.assertEqual(dpp_channel(5975), "131/5")
+        self.assertEqual(dpp_channel(6255), "131/61")
+        self.assertEqual(dpp_channel(7115), "131/233")
+        self.assertEqual(dpp_channel(5935), "136/2")
+
     ## Anything else is not a channel this can name, and saying so beats
     ## inventing a spec a peer will never listen on
     def test_frequencies_it_cannot_name(self):
@@ -64,6 +73,10 @@ class TestChannel(unittest.TestCase):
         self.assertIsNone(dpp_channel(5900))
         # channel 65: in range, but between classes 118 and 121
         self.assertIsNone(dpp_channel(5325))
+        # 5 MHz off the 6 GHz 20 MHz primary grid - a real frequency, but
+        # not one a peer can announce on
+        self.assertIsNone(dpp_channel(5960))
+        self.assertIsNone(dpp_channel(7135))
 
 
 class TestConfiguratorParams(unittest.TestCase):

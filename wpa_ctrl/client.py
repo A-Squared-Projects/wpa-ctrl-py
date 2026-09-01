@@ -151,6 +151,15 @@ def dpp_channel(frequency: int) -> Optional[str]:
         for operating_class, low, high in _FIVE_GHZ_CLASSES:
             if low <= channel <= high:
                 return f"{operating_class}/{channel}"
+    # 6 GHz: class 131 holds the 20 MHz primaries, channels 1, 5, 9 ...
+    # 233 on a 20 MHz grid from 5955 - a frequency between those centres
+    # is not a channel a peer can announce on, so it is refused rather
+    # than rounded. 5935 sits outside the grid and the table gives it a
+    # class of its own
+    if frequency == 5935:
+        return "136/2"
+    if 5955 <= frequency <= 7115 and (frequency - 5955) % 20 == 0:
+        return f"131/{(frequency - 5950) // 5}"
     return None
 
 

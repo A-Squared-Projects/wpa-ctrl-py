@@ -415,7 +415,8 @@ provisioned network offers, and a wrong one is invisible: an Enrollee given
 offered SAE, and stays there, because a stored network is never rewritten.
 
 `dpp_channel()` converts a frequency to the `81/6` form a bootstrapping URI
-carries. A peer announces itself on the channel its own URI names, so a
+carries, across 2.4, 5 and 6 GHz — always by global operating class, since
+a URI may be read in another regulatory domain. A peer announces itself on the channel its own URI names, so a
 listener anywhere else hears nothing — a failure indistinguishable from a
 peer that never announced.
 
