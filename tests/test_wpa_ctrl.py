@@ -381,6 +381,41 @@ class TestSsid(TestCase):
     def test_text_refuses_what_is_not_utf8(self):
         self.assertIsNone(Ssid(b"\xff\xfe").text)
 
+    ## The config side's three spellings: a quoted literal takes its bytes
+    #  as they stand - no escape processing, content running to the last
+    #  quote - P"..." adds the printf escapes, and anything else is hex
+    def test_from_config(self):
+        self.assertEqual(Ssid.from_config('"MyNet"'), b"MyNet")
+        self.assertEqual(Ssid.from_config('"a\\x62c"'), b"a\\x62c")
+        self.assertEqual(Ssid.from_config('"a"b"'), b'a"b')
+        self.assertEqual(Ssid.from_config('P"a\\x00b"'), b"a\x00b")
+        self.assertEqual(Ssid.from_config("4d794e6574"), b"MyNet")
+
+    def test_from_config_refuses_what_the_daemon_would(self):
+        for value in ('"unterminated', '"tail"x', "abc", "zz"):
+            with self.assertRaises(ValueError):
+                Ssid.from_config(value)
+
+    ## The daemon's own rule when writing a config: quoted for printable
+    #  ASCII, hex for everything else - UTF-8 included
+    def test_config_value(self):
+        self.assertEqual(Ssid(b"MyNet").config_value(), '"MyNet"')
+        self.assertEqual(Ssid("Café".encode()).config_value(), "436166c3a9")
+        self.assertEqual(Ssid(b"a\tb").config_value(), "610962")
+
+    def test_config_value_round_trips(self):
+        for octets in (b"MyNet", "Café".encode(), b"\x00\xff", b'a"b'):
+            ssid = Ssid(octets)
+            self.assertEqual(Ssid.from_config(ssid.config_value()), ssid)
+
+    ## The use this exists for: the wire spelling (status, events, scan
+    #  results) against the config spelling, compared as octets
+    def test_wire_and_config_spellings_meet_as_octets(self):
+        self.assertEqual(Ssid.from_printf("Caf\\xc3\\xa9"),
+                         Ssid.from_config('"Café"'))
+        self.assertEqual(Ssid.from_printf("Caf\\xc3\\xa9"),
+                         Ssid.from_config("436166c3a9"))
+
 
 ## The inverse of the printf-style escaping the daemon applies to octet
 #  strings on their way out. No server: this is a pure function

@@ -454,6 +454,37 @@ class Ssid(bytes):
     def from_printf(cls, text: str) -> 'Ssid':
         return cls(printf_decode(text))
 
+    ## Parse the spelling a configuration file, a GET_NETWORK reply or a
+    #  SET_NETWORK value uses for a string network variable. Three forms,
+    #  per wpa_config_parse_string() in hostap's src/utils/common.c:
+    #  "..." is the literal bytes between the first quote and the last,
+    #  with no escape processing at all; P"..." is the same with the
+    #  printf escapes; anything else is read as hex.
+    #
+    #  This is a different spelling from the one status() and scan
+    #  results use - the config side quotes, the event side escapes - and
+    #  comparing the two as text is the classic mistake this type exists
+    #  to end: go through octets instead,
+    #
+    #      Ssid.from_printf(status["ssid"]) == Ssid.from_config(value)
+    # @param value the text right of ssid=, as the file or reply holds it
+    # @return the SSID it spells
+    # @raises ValueError where the daemon's parser would refuse: an
+    #         unterminated quoted form, or hex of odd length or with a
+    #         character that is not hex
+    @classmethod
+    def from_config(cls, value: str) -> 'Ssid':
+        for prefix, decode in (('"', lambda body: body.encode()),
+                               ('P"', printf_decode)):
+            if value.startswith(prefix):
+                body, quote, tail = value[len(prefix):].rpartition('"')
+                if not quote or tail:
+                    raise ValueError(f"unterminated quoted string: {value!r}")
+                return cls(decode(body))
+        if len(value) % 2 or not all(c in _HEX_DIGITS for c in value):
+            raise ValueError(f"neither a quoted string nor hex: {value!r}")
+        return cls(bytes.fromhex(value))
+
     ## The UTF-8 reading, when there is one - a person's SSID almost
     #  always is UTF-8, but 802.11 promises nothing. None otherwise,
     #  rather than a replacement-character rendering under which two
@@ -465,6 +496,18 @@ class Ssid(bytes):
             return self.decode()
         except UnicodeDecodeError:
             return None
+
+    ## The spelling for a configuration file or SET_NETWORK, chosen by the
+    #  daemon's own rule when it writes a config out: the quoted literal
+    #  when every octet is printable ASCII, hex for anything else -
+    #  wpa_config_write_string() hexes any octet below 32 or above 126,
+    #  UTF-8 included. Hex is never wrong; the quoted form is offered only
+    #  where it reads back to exactly these octets
+    # @return the value to put right of ssid=
+    def config_value(self) -> str:
+        if all(32 <= byte <= 126 for byte in self):
+            return f'"{self.decode("ascii")}"'
+        return self.hex()
 
 
 ## One row of SCAN_RESULTS

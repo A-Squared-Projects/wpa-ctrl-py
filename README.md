@@ -281,6 +281,22 @@ up, and `printf_decode()` is the escape reversal on its own. The decoder
 speaks the daemon's whole dialect, including what its encoder never emits
 but its own decoder accepts, so both ends read the wire the same way.
 
+The configuration side spells the same octets differently: `ssid="..."`
+in a config file, a `GET_NETWORK` reply or a `SET_NETWORK` value is a
+quoted *literal* — no escape processing at all — with `P"..."` for a
+printf-escaped variant and bare hex for anything. Comparing that text
+against the wire's escaped text is the classic mistake; both sides meet
+as octets instead:
+
+```python
+Ssid.from_printf(wpa.status()["ssid"]) == Ssid.from_config('"Café"')
+```
+
+`Ssid.from_config()` reads all three config spellings, refusing what the
+daemon's parser would refuse, and `config_value()` writes one back by the
+daemon's own rule — quoted when every octet is printable ASCII, hex for
+everything else, UTF-8 included.
+
 ## DPP (Wi-Fi Easy Connect)
 
 Both daemons implement DPP, and all 29 of its commands have methods. The
