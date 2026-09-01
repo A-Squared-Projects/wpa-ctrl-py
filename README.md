@@ -258,11 +258,11 @@ wpa.bss("CURRENT", mask=BssMask.SSID | BssMask.LEVEL)
 802.11 says nothing about what the 0–32 bytes of an SSID mean. A person's
 access point almost certainly holds UTF-8; an embedded system can put any
 bytes there at all. The daemon prints SSIDs printf-escaped — `Café`
-arrives as `Caf\xc3\xa9` — so the `ssid` a `ScanResult`, a `Network` or
-a `Bss` carries is that escaped ASCII, which matches against itself and
-is wrong to show to anyone.
+arrives as `Caf\xc3\xa9` — so the `ssid` a `ScanResult`, a `Network`, a
+`Bss` or a `status()` reply carries is that escaped ASCII, which matches
+against itself and is wrong to show to anyone.
 
-All three carry the decoded forms alongside it. `ssid_bytes` is an
+All of them carry the decoded forms alongside it. `ssid_bytes` is an
 `Ssid` — a `bytes` subclass, because the octets are the identity: it
 compares and hashes as the plain bytes do, so it drops into sets and dict
 keys unannounced. `ssid_text` (also spelled `Ssid.text`) reads those

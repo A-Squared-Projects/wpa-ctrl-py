@@ -212,6 +212,26 @@ class TestParsing(WpaCtrlTestCase):
         self.start_server({"INTERFACES": "wlan0\nwlan1\n"})
         self.assertEqual(self.make_client().interfaces(), ["wlan0", "wlan1"])
 
+    ## STATUS prints its ssid through wpa_ssid_txt like everything else,
+    #  so the reply is a Status: still the dict, with the octet accessors
+    def test_status_ssid_decoding(self):
+        self.start_server({"STATUS": "bssid=02:00:01:02:03:04\n"
+                                     "ssid=Caf\\xc3\\xa9\n"
+                                     "wpa_state=COMPLETED\n"})
+        status = self.make_client().status()
+        self.assertIsInstance(status, dict)
+        self.assertEqual(status["ssid"], "Caf\\xc3\\xa9")
+        self.assertEqual(status.ssid_bytes, "Café".encode())
+        self.assertEqual(status.ssid_text, "Café")
+
+    ## Not associated means no ssid field at all, and that must answer
+    #  None rather than an empty name
+    def test_status_without_ssid(self):
+        self.start_server({"STATUS": "wpa_state=DISCONNECTED\n"})
+        status = self.make_client().status()
+        self.assertIsNone(status.ssid_bytes)
+        self.assertIsNone(status.ssid_text)
+
     ## LIST_NETWORKS prints the name printf-escaped like everything else,
     #  so Network carries the octet accessors too
     def test_network_ssid_decoding(self):

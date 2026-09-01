@@ -106,21 +106,22 @@ class DppConf:
     AP_DPP = "ap-dpp"
 
 
-## Hex-encode a string the way DPP carries SSIDs and passphrases.
+## Hex-encode a value the way DPP carries SSIDs and passphrases.
 #
 #  Not a convenience. The control interface takes these fields as hex, and
 #  supplying anything else fails silently in the worst way: the command is
 #  accepted, and the exchange is built and torn down later with no event and
 #  no log line to say why
-# @param text the value to encode
+# @param text the value to encode - text, or the octets themselves (an
+#        Ssid included), since an SSID need not be text at all
 # @return its hex encoding
 # @raises ValueError if there is nothing to encode, since an empty field is
 #         accepted by the daemon and produces exactly that silent failure
-def dpp_hex(text: str) -> str:
+def dpp_hex(text) -> str:
     if not text:
         raise ValueError("DPP fields cannot be empty; an empty one is "
                          "accepted and then fails silently")
-    return text.encode().hex()
+    return text.hex() if isinstance(text, bytes) else text.encode().hex()
 
 
 ## The global operating classes for 5 GHz, as (class, first channel, last)
@@ -163,7 +164,7 @@ def dpp_channel(frequency: int) -> Optional[str]:
 #  while a derived 64-character key can only ever serve WPA2 - and only the
 #  passphrase is hex-encoded, the key being hex already
 # @param conf one of DppConf
-# @param ssid the network name, encoded here
+# @param ssid the network name - text or octets - encoded here
 # @param passphrase the passphrase, encoded here
 # @param psk a 64-character hex key, passed through
 # @param configurator the configurator id to sign with
@@ -171,7 +172,7 @@ def dpp_channel(frequency: int) -> Optional[str]:
 # @return the parameter string
 # @raises ValueError if neither or both secrets are given, or if a psk is
 #         not a plausible derived key
-def dpp_configurator_params(conf: str, ssid: str, passphrase: str = None,
+def dpp_configurator_params(conf: str, ssid, passphrase: str = None,
                             psk: str = None, configurator=None,
                             **extra) -> str:
     if (passphrase is None) == (psk is None):
@@ -548,6 +549,33 @@ class ScanResult(NamedTuple):
     @property
     def ssid_text(self) -> Optional[str]:
         return self.ssid_bytes.text
+
+
+## The STATUS reply: the variable=value block as a dict, with the SSID
+#  octet accessors.
+#
+#  A dict subclass like Bss and for the same reason - the block is
+#  open-ended, and what STATUS-VERBOSE or a newer daemon adds should be
+#  visible rather than discarded. The ssid field is printed through
+#  wpa_ssid_txt() like everything else's, so it is the wire's escaped
+#  ASCII; matching it against a config file's ssid= is an octets
+#  comparison, Ssid.from_printf() against Ssid.from_config()
+class Status(Dict[str, str]):
+
+    ## The SSID as the octet string the air carried - see
+    #  ScanResult.ssid_bytes. None when there is no ssid field, i.e. not
+    #  associated
+    @property
+    def ssid_bytes(self) -> Optional[Ssid]:
+        value = self.get("ssid")
+        return None if value is None else Ssid.from_printf(value)
+
+    ## The SSID as text when its bytes are UTF-8, None when they are
+    #  not - see Ssid.text
+    @property
+    def ssid_text(self) -> Optional[str]:
+        value = self.ssid_bytes
+        return None if value is None else value.text
 
 
 ## One BSS, as the BSS command reports it.
@@ -960,8 +988,9 @@ class WpaCtrl:
 
     ## Current WPA/EAPOL/EAP status
     # @param verbose ask for STATUS-VERBOSE, which adds more variables
-    def status(self, verbose: bool = False) -> Dict[str, str]:
-        return parse_variables(self.request("STATUS-VERBOSE" if verbose else "STATUS"))
+    def status(self, verbose: bool = False) -> Status:
+        return Status(parse_variables(
+            self.request("STATUS-VERBOSE" if verbose else "STATUS")))
 
     ## The PMKSA cache
     def pmksa(self) -> List[PmksaEntry]:

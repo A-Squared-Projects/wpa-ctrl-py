@@ -8,7 +8,7 @@
 
 import unittest
 
-from wpa_ctrl import DppConf, dpp_channel, dpp_configurator_params, dpp_hex
+from wpa_ctrl import DppConf, Ssid, dpp_channel, dpp_configurator_params, dpp_hex
 
 
 class TestHex(unittest.TestCase):
@@ -25,6 +25,14 @@ class TestHex(unittest.TestCase):
     def test_an_empty_value_is_refused(self):
         with self.assertRaises(ValueError):
             dpp_hex("")
+        with self.assertRaises(ValueError):
+            dpp_hex(b"")
+
+    ## An SSID need not be text at all, so the octets go in as they are -
+    #  which is also how an Ssid flows straight into a DPP command
+    def test_it_takes_octets(self):
+        self.assertEqual(dpp_hex(b"\x00\xff"), "00ff")
+        self.assertEqual(dpp_hex(Ssid("café".encode())), "636166c3a9")
 
 
 class TestChannel(unittest.TestCase):
