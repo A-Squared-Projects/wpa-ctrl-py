@@ -34,6 +34,8 @@
 from .client import (
                      PASSPHRASE_MAX_LENGTH,
                      PASSPHRASE_MIN_LENGTH,
+                     Bss,
+                     BssMask,
                      DppConf,
                      KeyMgmt,
                      Network,
@@ -74,6 +76,8 @@ from .transport import (
 )
 
 __all__ = [
+    "Bss",
+    "BssMask",
     "CtrlTransport",
     "DppConf",
     "SYS_CLASS_NET",

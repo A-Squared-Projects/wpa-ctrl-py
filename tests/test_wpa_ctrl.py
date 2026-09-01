@@ -19,6 +19,7 @@ from fake_supplicant import FakeSupplicant
 
 from wpa_ctrl import (
     HOSTAPD_CTRL_DIR,
+    BssMask,
     Event,
     WpaCtrl,
     WpaCtrlCommandFailed,
@@ -218,6 +219,116 @@ class TestParsing(WpaCtrlTestCase):
                            "00:11:22:33:44:66\t2412\t-45\t[]\ttwo\n"})
         results = self.make_client().scan_results()
         self.assertEqual([r.ssid for r in results], ["two"])
+
+
+## The BSS FIRST / BSS NEXT-<id> walk that wpa_cli's all_bss performs.
+#  Ids are deliberately not contiguous in these fixtures - the daemon
+#  assigns them for the life of a BSS entry, so a table that has seen any
+#  expiry has holes, and a walk that counted instead of following ids
+#  would fall into one
+class TestIterBss(WpaCtrlTestCase):
+
+    BSS_0 = ("id=0\nbssid=00:09:5b:95:e0:4e\nfreq=2412\nlevel=-45\n"
+             "flags=[WPA2-PSK-CCMP][ESS]\nssid=jkm private\n")
+    BSS_3 = ("id=3\nbssid=02:00:01:02:03:04\nfreq=5180\nlevel=-60\n"
+             "flags=[SAE-CCMP][ESS]\nssid=other\n")
+
+    def test_walks_by_id_until_the_reply_is_empty(self):
+        server = self.start_server({"BSS FIRST": self.BSS_0,
+                                    "BSS NEXT-0": self.BSS_3,
+                                    "BSS NEXT-3": ""})
+        table = list(self.make_client().iter_bss())
+        self.assertEqual([info["ssid"] for info in table],
+                         ["jkm private", "other"])
+        self.assertEqual(server.received,
+                         ["BSS FIRST", "BSS NEXT-0", "BSS NEXT-3"])
+
+    def test_empty_table(self):
+        self.start_server({"BSS FIRST": ""})
+        self.assertEqual(list(self.make_client().iter_bss()), [])
+
+    ## Each BSS is a round trip of its own, which is why this is a
+    #  generator: a caller that stops stops the commands too
+    def test_stopping_early_sends_no_further_commands(self):
+        server = self.start_server({"BSS FIRST": self.BSS_0,
+                                    "BSS NEXT-0": self.BSS_3,
+                                    "BSS NEXT-3": ""})
+        for info in self.make_client().iter_bss():
+            self.assertEqual(info["ssid"], "jkm private")
+            break
+        self.assertEqual(server.received, ["BSS FIRST"])
+
+    ## The walk is keyed on id, so a mask that leaves it out would end the
+    #  walk after one BSS - ID is added rather than letting that happen
+    def test_mask_is_sent_with_id_forced_in(self):
+        server = self.start_server({"BSS FIRST MASK=0x7": self.BSS_0,
+                                    "BSS NEXT-0 MASK=0x7": ""})
+        table = list(self.make_client().iter_bss(mask=BssMask.BSSID | BssMask.FREQ))
+        self.assertEqual(len(table), 1)
+        self.assertEqual(server.received,
+                         ["BSS FIRST MASK=0x7", "BSS NEXT-0 MASK=0x7"])
+
+    ## A daemon answering NEXT with a BSS already seen is broken, but
+    #  looping on it forever would be worse
+    def test_a_repeated_id_ends_the_walk(self):
+        self.start_server({"BSS FIRST": self.BSS_0,
+                           "BSS NEXT-0": self.BSS_0})
+        table = list(self.make_client().iter_bss())
+        self.assertEqual(len(table), 1)
+
+    def test_bss_takes_a_mask(self):
+        server = self.start_server(
+            {"BSS 00:09:5b:95:e0:4e MASK=0x1000": "ssid=jkm private\n"})
+        info = self.make_client().bss("00:09:5b:95:e0:4e", mask=BssMask.SSID)
+        self.assertEqual(info, {"ssid": "jkm private"})
+        self.assertEqual(server.received, ["BSS 00:09:5b:95:e0:4e MASK=0x1000"])
+
+    def test_bss_without_a_mask_sends_none(self):
+        server = self.start_server({"BSS CURRENT": self.BSS_0})
+        info = self.make_client().bss("CURRENT")
+        self.assertEqual(info["bssid"], "00:09:5b:95:e0:4e")
+        self.assertEqual(server.received, ["BSS CURRENT"])
+
+    ## The reply is a Bss: still the dict of what the daemon sent, with
+    #  typed properties over it - spelled as ScanResult spells them
+    def test_bss_reply_is_typed(self):
+        self.start_server({"BSS CURRENT": self.BSS_0})
+        info = self.make_client().bss("CURRENT")
+        self.assertIsInstance(info, dict)
+        self.assertEqual(info.id, 0)
+        self.assertEqual(info.bssid, "00:09:5b:95:e0:4e")
+        self.assertEqual(info.frequency, 2412)
+        self.assertEqual(info.signal_level, -45)
+        self.assertEqual(info.ssid, "jkm private")
+        self.assertTrue(info.security.psk)
+
+    ## Fields carried as hex on the wire come back as their real types
+    def test_hex_fields_are_decoded(self):
+        self.start_server({"BSS CURRENT": "id=0\ncapabilities=0x0431\n"
+                                          "ie=dd050050f20101\n"
+                                          "wfd_subelems=000600411c440028\n"})
+        info = self.make_client().bss("CURRENT")
+        self.assertEqual(info.capabilities, 0x0431)
+        self.assertEqual(info.ie, bytes.fromhex("dd050050f20101"))
+        self.assertEqual(info.wfd_subelems, bytes.fromhex("000600411c440028"))
+
+    def test_update_idx_and_mld_address(self):
+        self.start_server({"BSS CURRENT": "id=0\nupdate_idx=42\n"
+                                          "ap_mld_addr=02:00:01:02:03:04\n"})
+        info = self.make_client().bss("CURRENT")
+        self.assertEqual(info.update_idx, 42)
+        self.assertEqual(info.ap_mld_addr, "02:00:01:02:03:04")
+
+    ## Absent answers None, not a default: the mask decides what is
+    #  reported, and "not asked for" must not read as a value - a missing
+    #  flags field is not an open network
+    def test_fields_the_mask_excluded_are_none(self):
+        self.start_server({"BSS CURRENT MASK=0x2":
+                           "bssid=02:00:01:02:03:04\n"})
+        info = self.make_client().bss("CURRENT", mask=BssMask.BSSID)
+        self.assertEqual(info.bssid, "02:00:01:02:03:04")
+        self.assertIsNone(info.frequency)
+        self.assertIsNone(info.security)
 
 
 class TestNetworkCommands(WpaCtrlTestCase):

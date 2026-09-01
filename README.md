@@ -209,6 +209,50 @@ if wpa.supports_key_mgmt(KeyMgmt.SAE):        # i.e. built with CONFIG_SAE
 SAE requires management frame protection and WPA2 predates it, so a network
 that has to work with both wants `OPTIONAL` rather than either extreme.
 
+## Every BSS in detail
+
+A scan result is one summary line per BSS. The `BSS` command reports one
+BSS in full — information elements included — and `iter_bss()` walks the
+whole table with it, the same iteration `wpa_cli all_bss` performs:
+
+```python
+from wpa_ctrl import BssMask
+
+for info in wpa.iter_bss(mask=BssMask.BSSID | BssMask.LEVEL | BssMask.SSID):
+    print(info.bssid, info.signal_level, info.ssid)
+```
+
+Each reply is a `Bss`: the variable block as a dict under the daemon's own
+names, with typed properties over the fields worth typing — `frequency`
+and `signal_level` as `ScanResult` spells them, `security` parsed the same
+way, `ie` as bytes. The block is open-ended — the mask decides what is
+present, and upstream adds fields freely — which is why it is a dict
+underneath rather than a fixed record: a field this package has never
+heard of is still in the dict. A property answers `None` where its field
+was not reported, because "not asked for" must not read as a value — a
+`Bss` fetched without flags is not an open network.
+
+Iterating is the point, not a convenience. A reply is one datagram, so
+asking for the whole table at once (`BSS RANGE=ALL`) is answered with as
+many BSSes as fit and no sign that the rest exist. The walk goes id by id
+— `BSS FIRST`, then `BSS NEXT-<id>` — so each BSS gets a datagram of its
+own, and a table that changes underneath the walk cannot slip it the way
+an index would.
+
+`iter_bss()` is a generator, because each BSS is a round trip of its own:
+a caller that finds what it wanted stops the commands too, and one that
+wants the whole table says `list(wpa.iter_bss())`.
+
+`BssMask` selects which fields each reply carries, with the bit values
+from `wpa_ctrl.h`; `id` is always included, because the walk is keyed on
+it. `bss()` reports a single BSS — addressed by BSSID, scan-result index,
+`ID-<id>`, `FIRST`, `LAST`, `NEXT-<id>` or `CURRENT` — and takes the same
+mask:
+
+```python
+wpa.bss("CURRENT", mask=BssMask.SSID | BssMask.LEVEL)
+```
+
 ## DPP (Wi-Fi Easy Connect)
 
 Both daemons implement DPP, and all 29 of its commands have methods. The
@@ -358,8 +402,8 @@ mock would only assert the implementation's own assumptions back at it.
 MIT — see [LICENSE](LICENSE).
 
 This is an independent implementation and contains no hostap code, but the
-event names are taken from `src/common/wpa_ctrl.h` and some test fixtures
-from `doc/ctrl_iface.doxygen`. hostap is BSD-3-Clause, which MIT combines
+event names and BSS mask values are taken from `src/common/wpa_ctrl.h` and
+some test fixtures from `doc/ctrl_iface.doxygen`. hostap is BSD-3-Clause, which MIT combines
 with freely; its notice is reproduced in [NOTICE](NOTICE) on account of
 those two. Neither this package nor its authors are affiliated with or
 endorsed by the hostap project.

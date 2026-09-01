@@ -5,9 +5,10 @@ not affiliated with or endorsed by that project or its authors.
 Two things in it are nevertheless derived from the hostap distribution, and
 its licence terms are reproduced below on that account:
 
-  - The event names in wpa_ctrl/events.py were extracted from
-    src/common/wpa_ctrl.h. They are the identifiers that appear on the wire,
-    so no other spelling of them would work.
+  - The event names in wpa_ctrl/events.py and the BSS field-mask values in
+    wpa_ctrl/client.py were extracted from src/common/wpa_ctrl.h. They are
+    the identifiers and values that appear on the wire, so no other spelling
+    of them would work.
 
   - Some example strings used as test fixtures in tests/test_wpa_ctrl.py are
     the sample outputs printed in doc/ctrl_iface.doxygen, used so that the

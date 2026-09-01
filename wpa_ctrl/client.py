@@ -9,7 +9,7 @@
 
 import logging
 import time
-from typing import Dict, FrozenSet, List, NamedTuple, Optional
+from typing import Dict, FrozenSet, Iterator, List, NamedTuple, Optional
 
 from .errors import WpaCtrlCommandFailed, WpaCtrlTimeout
 from .events import Event, is_event, parse_event
@@ -181,6 +181,51 @@ class Pmf:
     REQUIRED = "2"
 
 
+## Field-selection bits for the BSS command's MASK= argument.
+#
+#  The values come from src/common/wpa_ctrl.h in hostap, like the event
+#  names, and for the same reason: they are what the daemon reads off the
+#  wire, so no other values would work. hostap's notice is in NOTICE.
+#
+#  Generated from hostap 2_12-bp-305-g168f9755d9d0. A daemon ignores bits
+#  it does not know, so a stale list costs a caller a constant rather than
+#  a wrong reply
+class BssMask:
+    ID = 0x00000001
+    BSSID = 0x00000002
+    FREQ = 0x00000004
+    BEACON_INT = 0x00000008
+    CAPABILITIES = 0x00000010
+    QUAL = 0x00000020
+    NOISE = 0x00000040
+    LEVEL = 0x00000080
+    TSF = 0x00000100
+    AGE = 0x00000200
+    IE = 0x00000400
+    FLAGS = 0x00000800
+    SSID = 0x00001000
+    WPS_SCAN = 0x00002000
+    P2P_SCAN = 0x00004000
+    INTERNETW = 0x00008000
+    WIFI_DISPLAY = 0x00010000
+    ## Not a field: asks for "====" between entries in a multi-BSS reply,
+    #  which is why ALL leaves it out
+    DELIM = 0x00020000
+    MESH_SCAN = 0x00040000
+    SNR = 0x00080000
+    EST_THROUGHPUT = 0x00100000
+    FST = 0x00200000
+    UPDATE_IDX = 0x00400000
+    BEACON_IE = 0x00800000
+    FILS_INDICATION = 0x01000000
+    RNR = 0x02000000
+    ML = 0x04000000
+    AP_MLD_ADDR = 0x08000000
+    ## Every field bit, as wpa_ctrl.h spells it: everything except DELIM.
+    #  The daemon also reads a mask of 0 as this
+    ALL = 0xFFFDFFFF
+
+
 ## The protocol names a scan-result flag group can start with. WPA2 before WPA
 #  so the longer one wins when both would match
 _PROTOCOLS = ("WPA2", "WPA", "RSN", "OSEN")
@@ -344,6 +389,137 @@ class ScanResult(NamedTuple):
     @property
     def security(self) -> Security:
         return parse_security(self.flags)
+
+
+
+## One BSS, as the BSS command reports it.
+#
+#  A dict rather than a fixed record, because the block is open-ended: the
+#  MASK= argument decides which fields are present, and upstream adds
+#  fields without ceremony, so a fixed shape would either discard the
+#  unknown ones or forever chase them. Every field the daemon sent is here
+#  under its wire name; the properties type the ones worth typing, spelled
+#  as ScanResult spells them - frequency and signal_level, not the wire's
+#  freq and level - so the two report the same thing under the same name.
+#
+#  A property answers None for a field that was not reported. Absent
+#  means "not asked for" or "daemon predates it", and must not read as a
+#  value - the mask decides what is present, so with anything but ALL most
+#  of these are None by construction. A field that is present but not in
+#  the daemon's own format raises ValueError instead: that is not a BSS
+#  variation, it is a reply this parser does not understand.
+#
+#  Deliberately without properties: the anqp_* and hs20_* fields, which are
+#  hexdumps like ie (bytes.fromhex applies) but Interworking-specialist and
+#  partly dynamically named - anqp[<info-id>] cannot be a property at all.
+#  The wps_* fields are already the strings they look like. The RNR and ML
+#  masks produce prose lines rather than variables; they land in the dict
+#  under whatever precedes their first "=", unlovely but not lost
+class Bss(Dict[str, str]):
+
+    def _int(self, key: str, base: int = 10) -> Optional[int]:
+        value = self.get(key)
+        return None if value is None else int(value, base)
+
+    ## The daemon's id for this entry, stable while the entry lives -
+    #  which is what iter_bss() walks on
+    @property
+    def id(self) -> Optional[int]:
+        return self._int("id")
+
+    @property
+    def bssid(self) -> Optional[str]:
+        return self.get("bssid")
+
+    ## MHz, from the wire's freq field
+    @property
+    def frequency(self) -> Optional[int]:
+        return self._int("freq")
+
+    ## dBm, from the wire's level field
+    @property
+    def signal_level(self) -> Optional[int]:
+        return self._int("level")
+
+    @property
+    def noise(self) -> Optional[int]:
+        return self._int("noise")
+
+    @property
+    def snr(self) -> Optional[int]:
+        return self._int("snr")
+
+    @property
+    def qual(self) -> Optional[int]:
+        return self._int("qual")
+
+    ## Seconds since the daemon last saw this BSS
+    @property
+    def age(self) -> Optional[int]:
+        return self._int("age")
+
+    ## TUs, from the beacon_int field
+    @property
+    def beacon_interval(self) -> Optional[int]:
+        return self._int("beacon_int")
+
+    ## The 802.11 capability field, reported as hex on the wire
+    @property
+    def capabilities(self) -> Optional[int]:
+        return self._int("capabilities", 16)
+
+    @property
+    def tsf(self) -> Optional[int]:
+        return self._int("tsf")
+
+    ## kbps, from the est_throughput field
+    @property
+    def est_throughput(self) -> Optional[int]:
+        return self._int("est_throughput")
+
+    ## The BSS table's update counter when this entry last changed -
+    #  compare across fetches to see whether an entry moved
+    @property
+    def update_idx(self) -> Optional[int]:
+        return self._int("update_idx")
+
+    ## The AP MLD address, present when the BSS is a link of an 802.11be
+    #  multi-link device
+    @property
+    def ap_mld_addr(self) -> Optional[str]:
+        return self.get("ap_mld_addr")
+
+    @property
+    def ssid(self) -> Optional[str]:
+        return self.get("ssid")
+
+    @property
+    def flags(self) -> Optional[str]:
+        return self.get("flags")
+
+    ## What this BSS advertises, parsed from flags - None when flags was
+    #  not reported, because "not asked" must not read as "open network"
+    @property
+    def security(self) -> Optional[Security]:
+        flags = self.get("flags")
+        return None if flags is None else parse_security(flags)
+
+    ## The probe response / beacon information elements, from their hexdump
+    @property
+    def ie(self) -> Optional[bytes]:
+        value = self.get("ie")
+        return None if value is None else bytes.fromhex(value)
+
+    @property
+    def beacon_ie(self) -> Optional[bytes]:
+        value = self.get("beacon_ie")
+        return None if value is None else bytes.fromhex(value)
+
+    ## The concatenated Wi-Fi Display subelements, from their hexdump
+    @property
+    def wfd_subelems(self) -> Optional[bytes]:
+        value = self.get("wfd_subelems")
+        return None if value is None else bytes.fromhex(value)
 
 
 ## One row of the PMKSA cache
@@ -683,10 +859,59 @@ class WpaCtrl:
         return results
 
     ## Detailed results for one BSS.
-    # @param selector a BSSID, an index, FIRST, or NEXT-<bssid>
+    #
+    #  The documented selectors are a BSSID and an index into the scan
+    #  results; the daemon also takes ID-<id>, FIRST, LAST, NEXT-<id>,
+    #  CURRENT and p2p_dev_addr=<addr>. Its RANGE= forms answer with
+    #  several BSSes concatenated, which parse_variables would fold into
+    #  one - use iter_bss() for the table, or request() for the raw text
+    # @param selector which BSS
+    # @param mask BssMask bits selecting the fields wanted; every field
+    #        when omitted, and the daemon reads an explicit 0 the same way
     # @return the BSS variables, empty if there is no such BSS
-    def bss(self, selector) -> Dict[str, str]:
-        return parse_variables(self.request(f"BSS {selector}"))
+    def bss(self, selector, mask: Optional[int] = None) -> Bss:
+        command = f"BSS {selector}"
+        if mask is not None:
+            command += f" MASK={mask:#x}"
+        return Bss(parse_variables(self.request(command)))
+
+    ## Every BSS the daemon holds, in full - the iteration wpa_cli's
+    #  all_bss performs: BSS FIRST, then BSS NEXT-<id> until the reply is
+    #  empty.
+    #
+    #  Iterating is the point, not a convenience. A reply is one datagram,
+    #  so asking for the whole table at once (BSS RANGE=ALL) is answered
+    #  with as many BSSes as fit and no sign that the rest exist; walking
+    #  by id gives each BSS a datagram of its own. Walking by id also
+    #  holds the place properly - an index would slip when the table
+    #  changes underneath the walk. What an expiry mid-walk costs instead
+    #  is the tail: NEXT-<id> on an id that has just been dropped answers
+    #  empty, indistinguishable from the end of the table.
+    #
+    #  A generator, because each BSS is a round trip of its own: a caller
+    #  that finds what it wanted stops the commands too, and one that wants
+    #  the whole table says list(wpa.iter_bss()). Nothing is sent until
+    #  iteration begins, and nothing is held on the connection between
+    #  steps, so other commands can run mid-walk
+    # @param mask BssMask bits selecting the fields wanted; every field
+    #        when omitted. ID is added when missing, since the walk is
+    #        keyed on it
+    # @return one Bss per BSS, in the daemon's id order
+    def iter_bss(self, mask: Optional[int] = None) -> Iterator[Bss]:
+        if mask is not None:
+            mask |= BssMask.ID
+        seen = set()
+        selector = "FIRST"
+        while True:
+            info = self.bss(selector, mask=mask)
+            bss_id = info.get("id")
+            # An id seen twice would walk forever; a daemon answering NEXT
+            # with the same BSS is broken, but looping on it is worse
+            if bss_id is None or bss_id in seen:
+                return
+            seen.add(bss_id)
+            yield info
+            selector = f"NEXT-{bss_id}"
 
     ## Set the interface's scanning mode
     def ap_scan(self, value: int):
