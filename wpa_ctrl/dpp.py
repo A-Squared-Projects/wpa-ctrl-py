@@ -9,6 +9,8 @@
 
 from typing import Optional
 
+from .events import _EventView
+
 
 ## The kind of network a DPP Configurator hands to an Enrollee, i.e. the
 #  conf= parameter of DPP_CONFIGURATOR_PARAMS and DPP_PKEX_ADD.
@@ -133,3 +135,51 @@ def dpp_configurator_params(conf: str, ssid, passphrase: str = None,
 def format_params(**params) -> str:
     return " ".join(f"{name.rstrip('_')}={value}"
                     for name, value in params.items() if value is not None)
+
+
+## DPP-TX: a DPP frame went out to a peer. dst names the peer - the
+#  address a monitor keys an exchange on - and type is the frame number
+#  in DPP's public-action vocabulary: 11 a Configuration Result, 12 a
+#  Connection Status, 18 a PKEX Exchange Request, and so on
+class DppTx(_EventView):
+
+    NAME = "DPP-TX"
+
+    @property
+    def dst(self) -> Optional[str]:
+        return self.get("dst")
+
+    ## MHz, from the freq field
+    @property
+    def frequency(self) -> Optional[int]:
+        return self._int("freq")
+
+    ## The DPP frame type number
+    @property
+    def type(self) -> Optional[int]:
+        return self._int("type")
+
+
+## DPP-TX-STATUS: what became of that frame on the air
+class DppTxStatus(_EventView):
+
+    NAME = "DPP-TX-STATUS"
+
+    @property
+    def dst(self) -> Optional[str]:
+        return self.get("dst")
+
+    ## MHz, from the freq field
+    @property
+    def frequency(self) -> Optional[int]:
+        return self._int("freq")
+
+    ## SUCCESS, no-ACK or FAILED, as the daemon spells them
+    @property
+    def result(self) -> Optional[str]:
+        return self.get("result")
+
+    ## True when the peer acknowledged the frame
+    @property
+    def acknowledged(self) -> bool:
+        return self.get("result") == "SUCCESS"

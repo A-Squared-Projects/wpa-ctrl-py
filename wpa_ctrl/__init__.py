@@ -42,13 +42,22 @@ from .discovery import (
 )
 from .dpp import (
                      DppConf,
+                     DppTx,
+                     DppTxStatus,
                      dpp_channel,
                      dpp_configurator_params,
                      dpp_hex,
                      format_params,
 )
 from .errors import WpaCtrlCommandFailed, WpaCtrlConnectionError, WpaCtrlError, WpaCtrlTimeout
-from .events import Event, is_event, parse_event
+from .events import (
+                     Disconnected,
+                     Event,
+                     SsidTempDisabled,
+                     is_event,
+                     parse_event,
+                     parse_params,
+)
 from .replies import (
                      Bss,
                      BssMask,
@@ -86,7 +95,10 @@ __all__ = [
     "Bss",
     "BssMask",
     "CtrlTransport",
+    "Disconnected",
     "DppConf",
+    "DppTx",
+    "DppTxStatus",
     "SYS_CLASS_NET",
     "DEFAULT_CLIENT_DIR",
     "DEFAULT_CTRL_DIR",
@@ -103,6 +115,7 @@ __all__ = [
     "ScanResult",
     "Security",
     "SignalPoll",
+    "SsidTempDisabled",
     "Ssid",
     "Station",
     "Status",
@@ -124,6 +137,7 @@ __all__ = [
     "is_wireless",
     "is_event",
     "parse_event",
+    "parse_params",
     "parse_security",
     "parse_table",
     "parse_variables",

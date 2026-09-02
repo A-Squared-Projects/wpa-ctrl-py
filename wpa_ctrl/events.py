@@ -9,7 +9,10 @@
 #
 # @file events.py
 
-from typing import NamedTuple
+from typing import Dict, List, NamedTuple, Optional
+
+from .replies import _Variables
+from .ssid import Ssid
 
 ## Priority prefix on an event message. wpa_supplicant uses the syslog
 #  levels; anything at or below MSGDUMP is debug chatter
@@ -410,6 +413,12 @@ class Event(NamedTuple):
     def is_request(self) -> bool:
         return self.name.startswith(CTRL_REQ)
 
+    ## The key=value pairs in params, for the events that carry them -
+    #  see parse_params() for what a payload without any yields
+    @property
+    def variables(self) -> Dict[str, str]:
+        return parse_params(self.params)
+
 
 ## Parse one event message off the wire.
 #  Anything unrecognised still comes back as an Event rather than being
@@ -440,3 +449,156 @@ def parse_event(message: str) -> Event:
 # @param message the datagram, decoded
 def is_event(message: str) -> bool:
     return message.startswith("<")
+
+
+## Split a payload on spaces, except inside a quoted span, where a space
+#  is content and \" is an escaped quote rather than the closing one
+def _split_params(text: str) -> List[str]:
+    tokens = []
+    current = []
+    quoted = False
+    escaped = False
+    for char in text:
+        if escaped:
+            current.append(char)
+            escaped = False
+        elif quoted and char == "\\":
+            current.append(char)
+            escaped = True
+        elif char == '"':
+            current.append(char)
+            quoted = not quoted
+        elif char == " " and not quoted:
+            if current:
+                tokens.append("".join(current))
+                current = []
+        else:
+            current.append(char)
+    if current:
+        tokens.append("".join(current))
+    return tokens
+
+
+## Parse the space-separated key=value pairs an event payload carries -
+#  the reading inverse of format_params(), for payloads like
+#
+#      dst=02:00:00:00:03:00 freq=2412 type=11
+#      id=0 ssid="two words" auth_failures=1 duration=10 reason=WRONG_KEY
+#
+#  A quoted value keeps its spaces and loses only the quotes; the content
+#  is untouched, so a printf-escaped SSID stays escaped and
+#  Ssid.from_printf() applies. A token without an "=" is skipped rather
+#  than guessed at, exactly as parse_variables() treats such lines - a
+#  prose payload (DPP-FAIL) or a bare value (DPP-NETWORK-ID) yields an
+#  empty dict and no error, and Event.params still holds the text.
+#
+#  Substring checks against params cannot say this: "type=11" in params
+#  also matches type=110 and subtype=11, where parse_params(params)
+#  .get("type") == "11" matches exactly one thing
+# @param params the payload, i.e. Event.params
+# @return the pairs, in payload order, the last occurrence of a key
+#         winning
+def parse_params(params: str) -> Dict[str, str]:
+    variables = {}
+    for token in _split_params(params):
+        key, sep, value = token.partition("=")
+        if not sep or not key:
+            continue
+        if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
+            value = value[1:-1]
+        variables[key] = value
+    return variables
+
+
+## Shared base of the typed event views: the payload's key=value pairs
+#  as a dict of exactly what arrived, a NAME saying which event the view
+#  reads, and typed properties on each subclass for the fields worth
+#  typing. Views exist only for events with a real consumer; everything
+#  else stays raw in Event.params
+class _EventView(_Variables):
+
+    ## The event name this view reads
+    NAME = ""
+
+    ## The view over an event's payload
+    # @param event a parsed event named NAME
+    # @return the view
+    # @raises ValueError for an event of a different name, which would
+    #         otherwise read as a payload whose every field is absent -
+    #         a silent kind of wrong
+    @classmethod
+    def from_event(cls, event: Event) -> '_EventView':
+        if event.name != cls.NAME:
+            raise ValueError(f"{event.name} is not {cls.NAME}")
+        return cls(parse_params(event.params))
+
+
+## CTRL-EVENT-DISCONNECTED: the association ended.
+#
+#  The wire carries bssid= and reason=, and locally_generated=1 only when
+#  this side ended it - so locally_generated is a plain bool, absence
+#  meaning the AP's doing
+class Disconnected(_EventView):
+
+    NAME = "CTRL-EVENT-DISCONNECTED"
+
+    @property
+    def bssid(self) -> Optional[str]:
+        return self.get("bssid")
+
+    ## The 802.11 reason code
+    @property
+    def reason(self) -> Optional[int]:
+        return self._int("reason")
+
+    ## True when this side ended the association rather than the AP
+    @property
+    def locally_generated(self) -> bool:
+        return self.get("locally_generated") == "1"
+
+
+## CTRL-EVENT-SSID-TEMP-DISABLED: the daemon has given up on a network
+#  for a while.
+#
+#  The event that says why joining failed, emitted when the daemon stops
+#  trying rather than once per attempt - reason=WRONG_KEY is the
+#  wrong-passphrase signal a joining UI wants, and auth_failures tells
+#  one fat-fingered attempt from a systematically refused association.
+#  The ssid value arrives quoted and printf-escaped; ssid_bytes undoes
+#  both
+class SsidTempDisabled(_EventView):
+
+    NAME = "CTRL-EVENT-SSID-TEMP-DISABLED"
+
+    ## The network id, as LIST_NETWORKS spells it
+    @property
+    def id(self) -> Optional[int]:
+        return self._int("id")
+
+    ## The name as the octet string it is - see ScanResult.ssid_bytes
+    @property
+    def ssid_bytes(self) -> Optional[Ssid]:
+        value = self.get("ssid")
+        return None if value is None else Ssid.from_printf(value)
+
+    ## The name as text when its bytes are UTF-8 - see Ssid.text
+    @property
+    def ssid_text(self) -> Optional[str]:
+        value = self.ssid_bytes
+        return None if value is None else value.text
+
+    ## Failed attempts before the daemon gave up
+    @property
+    def auth_failures(self) -> Optional[int]:
+        return self._int("auth_failures")
+
+    ## Seconds the network stays disabled
+    @property
+    def duration(self) -> Optional[int]:
+        return self._int("duration")
+
+    ## Why, as the daemon spells it: WRONG_KEY, AUTH_FAILED, CONN_FAILED
+    #  or NO_PSK_AVAILABLE
+    @property
+    def reason(self) -> Optional[str]:
+        return self.get("reason")

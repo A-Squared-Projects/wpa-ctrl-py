@@ -153,11 +153,11 @@ class ScanResult(NamedTuple):
         return self.ssid_bytes.text
 
 
-## Shared base of the variable-block replies (Status, Bss, SignalPoll):
-#  a dict of exactly what the daemon sent, with the int parsing the typed
-#  properties share. A property answers None for a field that was not
-#  reported, and raises ValueError for one that is present but not in
-#  the daemon's own format
+## Shared base of the variable-block types - the replies (Status, Bss,
+#  SignalPoll) and the typed event views: a dict of exactly what the
+#  daemon sent, with the int parsing the typed properties share. A
+#  property answers None for a field that was not reported, and raises
+#  ValueError for one that is present but not in the daemon's own format
 class _Variables(Dict[str, str]):
 
     def _int(self, key: str, base: int = 10) -> Optional[int]:

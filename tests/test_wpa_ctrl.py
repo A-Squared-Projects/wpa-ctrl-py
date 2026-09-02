@@ -20,8 +20,12 @@ from fake_supplicant import FakeSupplicant
 from wpa_ctrl import (
     HOSTAPD_CTRL_DIR,
     BssMask,
+    Disconnected,
+    DppTx,
+    DppTxStatus,
     Event,
     Ssid,
+    SsidTempDisabled,
     WpaCtrl,
     WpaCtrlCommandFailed,
     WpaCtrlConnectionError,
@@ -29,6 +33,7 @@ from wpa_ctrl import (
     compat,
     interface_path,
     parse_event,
+    parse_params,
     printf_decode,
     quote,
 )
@@ -739,6 +744,109 @@ class TestEvents(WpaCtrlTestCase):
         self.assertEqual(status["wpa_state"], "COMPLETED")
         # ...and the event is still there to be collected afterwards
         self.assertEqual(client.next_event().name, "CTRL-EVENT-SCAN-RESULTS")
+
+
+## The event-payload tokenizer: space-separated key=value, quotes keeping
+#  their spaces, everything else passing through unharmed
+class TestParseParams(TestCase):
+
+    def test_plain_pairs(self):
+        self.assertEqual(parse_params("dst=02:00:00:00:03:00 freq=2412 type=11"),
+                         {"dst": "02:00:00:00:03:00", "freq": "2412",
+                          "type": "11"})
+
+    ## The exactness a substring check cannot give: "type=11" in params
+    #  also matches these
+    def test_keys_and_values_match_exactly(self):
+        params = parse_params("subtype=11 type=110")
+        self.assertEqual(params["type"], "110")
+        self.assertEqual(params["subtype"], "11")
+        self.assertNotIn("type=11", params.values())
+
+    ## A quoted value keeps its spaces and loses only the quotes; the
+    #  printf escaping inside is untouched, so Ssid.from_printf applies
+    def test_quoted_values(self):
+        params = parse_params('id=0 ssid="two words" reason=WRONG_KEY')
+        self.assertEqual(params["ssid"], "two words")
+        self.assertEqual(params["reason"], "WRONG_KEY")
+
+    def test_escaped_quote_does_not_close(self):
+        params = parse_params('ssid="a\\"b" x=1')
+        self.assertEqual(params["ssid"], 'a\\"b')
+        self.assertEqual(params["x"], "1")
+
+    ## Not every payload is key=value: DPP-FAIL is prose and
+    #  DPP-NETWORK-ID a bare id. Neither errors, and Event.params still
+    #  holds the text
+    def test_prose_and_bare_payloads_yield_nothing(self):
+        self.assertEqual(parse_params(
+            "AES-SIV decryption failed - possible PKEX code mismatch"), {})
+        self.assertEqual(parse_params("42"), {})
+        self.assertEqual(parse_params(""), {})
+
+    def test_event_variables_property(self):
+        event = parse_event("<3>DPP-TX dst=02:00:00:00:03:00 freq=2412 type=11")
+        self.assertEqual(event.variables["type"], "11")
+
+
+## The typed views over the event payloads with a real consumer; every
+#  other event stays raw in Event.params
+class TestEventViews(TestCase):
+
+    def test_disconnected(self):
+        event = parse_event("<3>CTRL-EVENT-DISCONNECTED "
+                            "bssid=02:00:01:02:03:04 reason=3 "
+                            "locally_generated=1")
+        view = Disconnected.from_event(event)
+        self.assertEqual(view.bssid, "02:00:01:02:03:04")
+        self.assertEqual(view.reason, 3)
+        self.assertTrue(view.locally_generated)
+
+    ## locally_generated is only on the wire when this side ended it, so
+    #  absence reads as the AP's doing, not as unknown
+    def test_disconnected_by_the_ap(self):
+        event = parse_event("<3>CTRL-EVENT-DISCONNECTED "
+                            "bssid=02:00:01:02:03:04 reason=4")
+        self.assertFalse(Disconnected.from_event(event).locally_generated)
+
+    ## The event a joining UI wants: reason=WRONG_KEY is the
+    #  wrong-passphrase signal, and the ssid arrives quoted and escaped
+    def test_ssid_temp_disabled(self):
+        event = parse_event('<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 '
+                            'ssid="Caf\\xc3\\xa9 bar" auth_failures=1 '
+                            'duration=10 reason=WRONG_KEY')
+        view = SsidTempDisabled.from_event(event)
+        self.assertEqual(view.id, 0)
+        self.assertEqual(view.ssid_text, "Café bar")
+        self.assertEqual(view.auth_failures, 1)
+        self.assertEqual(view.duration, 10)
+        self.assertEqual(view.reason, "WRONG_KEY")
+
+    def test_dpp_tx(self):
+        event = parse_event("<3>DPP-TX dst=02:00:00:00:03:00 freq=2412 "
+                            "type=11")
+        view = DppTx.from_event(event)
+        self.assertEqual(view.dst, "02:00:00:00:03:00")
+        self.assertEqual(view.frequency, 2412)
+        self.assertEqual(view.type, 11)
+
+    def test_dpp_tx_status(self):
+        event = parse_event("<3>DPP-TX-STATUS dst=02:00:00:00:03:00 "
+                            "freq=2412 result=SUCCESS")
+        view = DppTxStatus.from_event(event)
+        self.assertEqual(view.result, "SUCCESS")
+        self.assertTrue(view.acknowledged)
+        no_ack = DppTxStatus.from_event(parse_event(
+            "<3>DPP-TX-STATUS dst=02:00:00:00:03:00 freq=2412 result=no-ACK"))
+        self.assertFalse(no_ack.acknowledged)
+
+    ## A view on the wrong event would read as a payload with every field
+    #  absent - refused instead
+    def test_a_view_refuses_another_event(self):
+        event = parse_event("<3>CTRL-EVENT-CONNECTED - Connection to "
+                            "02:00:01:02:03:04 completed [id=0 id_str=]")
+        with self.assertRaises(ValueError):
+            Disconnected.from_event(event)
 
 
 class TestCompatLayer(WpaCtrlTestCase):

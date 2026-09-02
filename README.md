@@ -59,6 +59,38 @@ one datagram. Unregister the descriptor before `close()` — it is closed with
 the socket, and a loop still watching it will spin. Use a connection that is
 attached and does nothing else, so everything arriving is an event.
 
+### Event payloads
+
+`Event.params` is the payload unparsed, because payloads have no single
+grammar: most modern events carry space-separated `key=value` pairs, but
+some are prose and one is a bare number. `parse_params()` — also spelled
+`event.variables` — reads the `key=value` kind, keeping a quoted value's
+spaces and skipping tokens without an `=`, so a prose payload yields an
+empty dict rather than a guess. It is exact where a substring check is
+not: `"type=11" in event.params` also matches `type=110` and
+`subtype=11`; `event.variables.get("type") == "11"` matches one thing.
+
+A few events carry typed views — only the ones with a real consumer,
+everything else staying raw. `Disconnected` reads `reason` and
+`locally_generated` (a plain bool: the wire only carries it when this
+side hung up). `SsidTempDisabled` is the one a joining UI wants: the
+daemon emits it when it gives up on a network, `reason=WRONG_KEY` is the
+wrong-passphrase signal, `auth_failures` tells one fat-fingered attempt
+from a systematically refused association, and the quoted, escaped
+`ssid` comes back as octets via `ssid_bytes`. `DppTx` (`dst`, `type`)
+and `DppTxStatus` (`result`, `acknowledged`) cover the DPP monitor path:
+
+```python
+event = monitor.next_event(timeout=10)
+if event and event.name == SsidTempDisabled.NAME:
+    failure = SsidTempDisabled.from_event(event)
+    if failure.reason == "WRONG_KEY":
+        ...
+```
+
+`from_event()` refuses an event of any other name — a mismatched view
+would otherwise read as a payload whose every field is absent.
+
 ## Finding the interfaces
 
 `wlan0` is a default, not a promise: udev rules, systemd's predictable names
