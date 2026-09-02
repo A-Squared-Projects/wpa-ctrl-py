@@ -20,6 +20,7 @@ uv run ruff check                                # lint (E, F, I, B; line length
 - **Zero dependencies, stdlib only.** `tests/test_imports.py` enforces an explicit whitelist of stdlib imports (`EXPECTED_STDLIB_IMPORTS`) via AST scanning, because OpenEmbedded derives packaging RDEPENDS from it. Adding any import to `wpa_ctrl/` means updating that set deliberately.
 - **No hostap code may be copied in.** This is an independent implementation; only event names (from `src/common/wpa_ctrl.h`) and some test fixtures (from `doc/ctrl_iface.doxygen`) derive from hostap, acknowledged in NOTICE. Keep it that way.
 - Comments are Doxygen-style (`## @package`, `##` block comments, `# @param`, `# @return`), not docstrings. Match this style; explain *why*, as the existing comments do.
+- Commit messages: subject is the *what*, body is the *why*, written as facts about the final state — the constraint or protocol fact that decides the shape. Never narrate the change ("was this, is now", "X used to", "had grown to"); the reader has the final state in front of them, and a story about a defunct one makes them reconstruct history to understand the present. A plain status note ("Additive; no behaviour changes") is fine.
 
 ## Architecture
 
